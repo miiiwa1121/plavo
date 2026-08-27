@@ -4,8 +4,8 @@ plavo の要件定義ドキュメント一覧。
 
 | ファイル | 内容 | 状態 |
 |---|---|---|
-| [decisions.md](./decisions.md) | 設計上の決定事項37件。依存関係の順に、決定・理由・後続への制約を記録 | 確定（一部保留あり） |
-| [functional-requirements.md](./functional-requirements.md) | 機能要件。実装する13機能と、設計のみの6機能 | 第2版 |
+| [decisions.md](./decisions.md) | 設計上の決定事項38件。依存関係の順に、決定・理由・後続への制約を記録 | 確定（一部保留あり） |
+| [functional-requirements.md](./functional-requirements.md) | 機能要件。実装する14機能と、設計のみの6機能 | 第2版 |
 | [user-stories.md](./user-stories.md) | 利用シナリオ。出会いから別れまでの時間軸の物語 | 初版 |
 | [non-functional-requirements.md](./non-functional-requirements.md) | 性能・信頼性・プライバシー・対応環境 | 初版（数値は提案） |
 
@@ -48,6 +48,7 @@ plavo の要件定義ドキュメント一覧。
 
 | # | 論点 | 優先度 |
 |---|---|---|
-| L-8 | 死因の判定と、追悼ムービーの語り口の出し分け | **高** |
 | C-1 | 「カメラを反転させる」の意味（未回答） | 中 |
 | N-1〜N-4 | 最低OSバージョン、APIコスト上限、保存容量、配布方法 | 中 |
+
+L-8（死因の判定と追悼の語り口）は **D30 として解決済み**。
