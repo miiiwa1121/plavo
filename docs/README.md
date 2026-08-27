@@ -11,7 +11,7 @@ plavo のドキュメント全体の入口。各ディレクトリの README が
 | design/ | アーキテクチャ、ドメインモデル、AI診断設計、画面設計 | 次に着手 |
 | api/ | API仕様（診断プロキシ） | 未作成 |
 | development/ | セットアップ、ディレクトリ構成、開発ガイド | 未作成 |
-| devlog/ | 実装ログ（`yyyymmdd.md`） | 未作成（実装開始後） |
+| [devlog/](./devlog/) | 開発ログ（`yyyymmdd.md`）。随時追記 | 記録中 |
 
 ## plavo とは
 
@@ -31,7 +31,7 @@ plavo のドキュメント全体の入口。各ディレクトリの README が
 
 - ファイル冒頭に、そのファイルが何かを示すタイトルを書く
 - `docs/` 内にディレクトリを作ったら、直下に `README.md` を置いて目次にする
-- 実装のたびに `docs/devlog/yyyymmdd.md` にログを追記する
+- 作業したら随時 `docs/devlog/yyyymmdd.md` にログを追記する（実装に限らない）
 - ファイル名は ASCII のケバブケース、本文とタイトルは日本語
 
 詳細は [CLAUDE.md](../CLAUDE.md) を参照。
