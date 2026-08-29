@@ -1,0 +1,23 @@
+{
+  "name": "plavo-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "plavo の診断プロキシと検証ハーネス",
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "gen:fixtures": "tsx src/fixtures/generate.ts",
+    "test:metrics": "tsx src/domain/metrics.test.ts",
+    "verify": "tsx src/verify/run.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.121.0",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  }
+}
