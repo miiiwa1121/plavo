@@ -4,6 +4,7 @@ plavo の設計ドキュメント一覧。要件は [../requirements/](../requir
 
 | ファイル | 内容 | 状態 |
 |---|---|---|
+| [tech-stack.md](./tech-stack.md) | 技術選定。確定・暫定・未決を区別した生きたドキュメント | 更新中 |
 | [architecture.md](./architecture.md) | 全体構成、レイヤ、データフロー、外部依存 | 初版 |
 | [domain-model.md](./domain-model.md) | エンティティ、導出指標、生育ステージ、親密度 | 初版 |
 | [diagnosis-prompt.md](./diagnosis-prompt.md) | 診断プロンプトの設計、出力スキーマ、セリフの生成方針、検証方法 | 初版 |
@@ -21,15 +22,16 @@ plavo の設計ドキュメント一覧。要件は [../requirements/](../requir
 
 ## 技術スタック
 
-| 領域 | 選定 | 根拠 |
-|---|---|---|
-| プラットフォーム | iOS ネイティブ | D15 |
-| UI | SwiftUI | D13（タブ構成）、D15 |
-| AR | ARKit（ワールドトラッキング） | D3 |
-| 3D描画 | RealityKit | D16-a |
-| 物体検出 | Vision framework | D4（オンデバイス検出が必須） |
-| 永続化 | SwiftData + CloudKit | D10 / D19 |
-| 診断 | Claude API（`claude-opus-5`）経由のプロキシ | D6 / D10 |
+詳細と根拠は [tech-stack.md](./tech-stack.md)。確定・暫定・未決を区別してある。
+
+| 領域 | 選定 |
+|---|---|
+| プラットフォーム | iOS ネイティブ（Swift 6 / SwiftUI） |
+| AR | ARKit（ワールドトラッキング 6DoF） |
+| 3D描画 | RealityKit |
+| 物体検出 | Vision framework |
+| 永続化（展示） | **なし。**バンドル同梱の JSON ＋ メモリのみ（D36） |
+| 診断（展示） | **なし。**セリフは事前生成（D34） |
 
 ## 読む順序
 
