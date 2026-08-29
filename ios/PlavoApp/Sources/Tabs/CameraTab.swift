@@ -119,13 +119,17 @@ struct CameraTab: View {
         .onLongPressGesture(minimumDuration: 1.5) { showMockControls.toggle() }
     }
 
-    /// 実センサーが繋がるまでの代替操作（gadget-interface.md §9）。
+    /// 実センサーが繋がるまでの代替操作と、ARの診断表示。
+    ///
     /// 原則2により来場者には数値を見せないため、長押しで開く。
+    /// 診断は、吹き出しが出ないときにどこで失敗したのかを切り分けるために出す。
     private var mockPanel: some View {
         VStack(spacing: 10) {
             Text(model.usingRealSensor ? "実センサー接続中" : "モック操作（説明員用）")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
+
+            diagnostics
 
             Button {
                 // 水やりは数分で土に染みる。1ステップの跳ね上がりとして表現する
@@ -149,15 +153,69 @@ struct CameraTab: View {
             }
             .font(.caption)
 
-            Button("リセット", role: .destructive) {
-                model.reset()
-                refreshLine(force: true)
+            HStack(spacing: 12) {
+                Button("再検出") {
+                    scene.redetect()
+                    line = ""
+                }
+                Button("リセット", role: .destructive) {
+                    model.reset()
+                    scene.redetect()
+                    line = ""
+                }
             }
             .font(.caption)
         }
         .padding()
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 14))
         .padding(.horizontal)
+    }
+
+    /// AR の診断表示。吹き出しが出ないときの切り分けに使う。
+    ///
+    ///   トラッキング  … 「制限中（特徴が足りない）」なら環境が暗い・無地すぎる
+    ///   特徴点        … 少ないと奥行きが取れず追従も不安定になる
+    ///   検出          … 試行回数に対して成功が0なら、前景マスクが被写体を見つけていない
+    ///   奥行き        … 「固定」ならレイキャストが外れている（D3-a のフォールバック）
+    ///   吹き出し      … 座標が nil なら、アンカーはあるが画面外か背面にある
+    private var diagnostics: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            row("トラッキング", scene.trackingDescription)
+            row("特徴点", "\(scene.featurePointCount)")
+            row(
+                "検出",
+                "\(scene.detectionHits)/\(scene.detectionAttempts) 回  "
+                    + String(format: "%.0fms", scene.lastDetectionDuration * 1000)
+                    + String(format: "  間隔%.1fs", scene.currentDetectionInterval))
+            row("対象", subjectDescription)
+            row("奥行き", scene.depthFromRaycast ? "レイキャスト" : "固定(1.2m)")
+            row("距離", String(format: "%.2fm", scene.anchorDistance))
+            row(
+                "吹き出し",
+                scene.bubbleScreenPoint.map {
+                    String(format: "(%.0f, %.0f)", $0.x, $0.y)
+                } ?? "画面外")
+        }
+        .font(.caption2.monospaced())
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(10)
+        .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func row(_ label: String, _ value: String) -> some View {
+        HStack {
+            Text(label).foregroundStyle(.secondary)
+            Spacer()
+            Text(value)
+        }
+    }
+
+    private var subjectDescription: String {
+        switch scene.subject {
+        case .none: "なし"
+        case .plant: "植物"
+        case .panel(let key, _): "パネル(\(key))"
+        }
     }
 
     /// 遠いほど小さく見せる。空間に置かれている感じを出す

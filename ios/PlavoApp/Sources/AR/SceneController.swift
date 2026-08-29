@@ -49,6 +49,23 @@ final class SceneController: NSObject {
     /// 直近の検出にかかった時間。デバッグと間隔の調整に使う
     private(set) var lastDetectionDuration: TimeInterval = 0
 
+    // MARK: - 診断
+    //
+    // 吹き出しが出なかったとき、どこで失敗したのかを切り分けるために持つ。
+    // 検出に失敗したのか、アンカーが打てなかったのか、投影で画面外になったのか。
+
+    /// ARKit のトラッキング状態。limited のとき理由も分かる
+    private(set) var trackingDescription = "—"
+    /// 現在の特徴点の数。少ないと奥行きが取れず、追従も不安定になる
+    private(set) var featurePointCount = 0
+    /// 奥行きがレイキャストで取れたか。false なら固定距離のフォールバック（D3-a）
+    private(set) var depthFromRaycast = false
+    /// 検出を試みた回数と、そのうち被写体が見つかった回数
+    private(set) var detectionAttempts = 0
+    private(set) var detectionHits = 0
+    /// 現在の検出間隔（実測に応じて伸びる）
+    var currentDetectionInterval: TimeInterval { detectionInterval }
+
     /// 奥行きが取れなかったときの既定距離（D3-a）
     private let fallbackDistance: Float = 1.2
 
@@ -89,6 +106,14 @@ final class SceneController: NSObject {
         bubbleScreenPoint = nil
     }
 
+    /// アンカーを捨てて、もう一度検出からやり直す。検証で繰り返し試すときに使う
+    func redetect() {
+        subject = .none
+        worldPosition = nil
+        bubbleScreenPoint = nil
+        lastDetectionAt = 0
+    }
+
     // MARK: - パネル
 
     private func handle(imageAnchor: ARImageAnchor) {
@@ -124,7 +149,9 @@ final class SceneController: NSObject {
                 guard let self else { return }
                 self.isDetecting = false
                 self.adaptInterval(lastDuration: elapsed)
+                self.detectionAttempts += 1
                 guard let box, case .none = self.subject else { return }
+                self.detectionHits += 1
                 self.placeAnchor(forNormalizedBox: box)
                 self.subject = .plant
             }
@@ -203,8 +230,10 @@ final class SceneController: NSObject {
     /// レイキャストが当たればその距離、外れたら固定距離に置く。
     private func resolveWorldPosition(at point: CGPoint, in view: ARView) -> SIMD3<Float> {
         if let hit = view.raycast(from: point, allowing: .estimatedPlane, alignment: .any).first {
+            depthFromRaycast = true
             return hit.worldTransform.translation
         }
+        depthFromRaycast = false
         guard let camera = view.session.currentFrame?.camera else {
             return SIMD3<Float>(0, 0, -fallbackDistance)
         }
@@ -233,12 +262,32 @@ extension SceneController: ARSessionDelegate {
 
     nonisolated func session(_ session: ARSession, didUpdate frame: ARFrame) {
         Task { @MainActor in
+            self.updateDiagnostics(frame)
             self.project(frame)
             guard case .none = self.subject else { return }
             let now = frame.timestamp
             guard now - self.lastDetectionAt >= self.detectionInterval else { return }
             self.lastDetectionAt = now
             self.detectPlant(in: frame)
+        }
+    }
+
+    /// 診断情報を更新する。吹き出しが出ないときの切り分けに使う
+    private func updateDiagnostics(_ frame: ARFrame) {
+        featurePointCount = frame.rawFeaturePoints?.points.count ?? 0
+        switch frame.camera.trackingState {
+        case .normal:
+            trackingDescription = "正常"
+        case .notAvailable:
+            trackingDescription = "利用不可"
+        case .limited(let reason):
+            switch reason {
+            case .initializing: trackingDescription = "初期化中"
+            case .excessiveMotion: trackingDescription = "制限中（動かしすぎ）"
+            case .insufficientFeatures: trackingDescription = "制限中（特徴が足りない）"
+            case .relocalizing: trackingDescription = "制限中（復帰中）"
+            @unknown default: trackingDescription = "制限中"
+            }
         }
     }
 
