@@ -1,140 +1,43 @@
-import PlavoCore
 import SwiftUI
 
-/// 展示の全体。4セクションを一本道でたどる（D33）。
+/// アプリの構造。タブ構成（D13）。
 ///
-/// タブではなくフローにしているのは、来場者が順番を崩すと何を見ているのか
-/// 分からなくなるため。製品版のタブ構成（D13）とは別物として扱う。
+/// 起動時の既定はカメラ（D2）。カメラがトップ画面であることが、
+/// このプロダクトの構造そのものを表す。
+///
+/// 展示のフロー（説明 → AR → 時系列 → センサー）は説明員と物理配置が担う。
+/// アプリの構造とは関係しない。
 struct RootView: View {
-    @State private var session = ExhibitionSession()
-    @State private var showResetConfirm = false
+    @State private var model = AppModel()
+    @State private var selection: Int = Self.initialTab
+
+    /// 起動引数でタブを指定できる。動作確認と、展示中に説明員が
+    /// 特定のタブから始めたい場面で使う。
+    ///   例: -startTab 2
+    private static var initialTab: Int {
+        guard let raw = UserDefaults.standard.string(forKey: "startTab"),
+            let index = Int(raw), (0..<5).contains(index)
+        else { return 0 }
+        return index
+    }
 
     var body: some View {
-        ZStack {
-            content
-                .transition(.opacity)
-
-            VStack {
-                header
-                Spacer()
-                footer
+        TabView(selection: $selection) {
+            Tab("カメラ", systemImage: "camera.viewfinder", value: 0) {
+                CameraTab(model: model)
+            }
+            Tab("マイプラント", systemImage: "leaf", value: 1) {
+                MyPlantTab(model: model)
+            }
+            Tab("日記", systemImage: "book", value: 2) {
+                DiaryTab(model: model)
+            }
+            Tab("ルーム", systemImage: "square.grid.2x2", value: 3) {
+                RoomTab()
+            }
+            Tab("マイページ", systemImage: "person", value: 4) {
+                MyPageTab(model: model)
             }
         }
-        .animation(.easeInOut(duration: 0.25), value: session.section)
-        .overlay(alignment: .topTrailing) { staffControl }
-        .confirmationDialog(
-            "最初から始めますか",
-            isPresented: $showResetConfirm,
-            titleVisibility: .visible
-        ) {
-            Button("リセットする", role: .destructive) { session.reset() }
-            Button("やめる", role: .cancel) {}
-        } message: {
-            Text("次の来場者のために、この回の記録を消します")
-        }
-    }
-
-    // MARK: - 中身
-
-    @ViewBuilder
-    private var content: some View {
-        if let error = session.loadError {
-            LoadFailureView(message: error)
-        } else {
-            switch session.section {
-            case .intro: IntroView()
-            case .livePlant: LivePlantView(session: session)
-            case .timeline: TimelineView(session: session)
-            case .sensor: SensorView(session: session)
-            }
-        }
-    }
-
-    // MARK: - 進行の枠
-
-    private var header: some View {
-        VStack(spacing: 4) {
-            Text(session.section.title)
-                .font(.headline)
-            Text(session.section.value)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            ProgressDots(
-                total: ExhibitionSession.Section.allCases.count,
-                current: session.section.rawValue
-            )
-            .padding(.top, 4)
-        }
-        .padding(.vertical, 10)
-        .frame(maxWidth: .infinity)
-        .background(.ultraThinMaterial)
-    }
-
-    private var footer: some View {
-        HStack {
-            Button {
-                session.back()
-            } label: {
-                Label("もどる", systemImage: "chevron.left")
-            }
-            .disabled(!session.canGoBack)
-
-            Spacer()
-
-            Button {
-                session.advance()
-            } label: {
-                Label("つぎへ", systemImage: "chevron.right")
-            }
-            .disabled(!session.canAdvance)
-            .buttonStyle(.borderedProminent)
-        }
-        .padding()
-        .background(.ultraThinMaterial)
-    }
-
-    /// 説明員用のリセット操作（L-13）。
-    /// 体験中に誤って押されないよう、目立たない位置で長押しにしている。
-    private var staffControl: some View {
-        Color.clear
-            .frame(width: 56, height: 56)
-            .contentShape(Rectangle())
-            .onLongPressGesture(minimumDuration: 1.0) {
-                showResetConfirm = true
-            }
-            .accessibilityHidden(true)
-    }
-}
-
-private struct ProgressDots: View {
-    let total: Int
-    let current: Int
-
-    var body: some View {
-        HStack(spacing: 6) {
-            ForEach(0..<total, id: \.self) { i in
-                Circle()
-                    .fill(i == current ? Color.primary : Color.secondary.opacity(0.3))
-                    .frame(width: 6, height: 6)
-            }
-        }
-    }
-}
-
-private struct LoadFailureView: View {
-    let message: String
-
-    var body: some View {
-        VStack(spacing: 12) {
-            Image(systemName: "exclamationmark.triangle")
-                .font(.largeTitle)
-            Text("セリフを読み込めませんでした")
-                .font(.headline)
-            Text(message)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-        }
-        .padding()
     }
 }
