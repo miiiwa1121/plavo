@@ -60,14 +60,31 @@ final class SceneController: NSObject {
     private(set) var featurePointCount = 0
     /// 奥行きがレイキャストで取れたか。false なら固定距離のフォールバック（D3-a）
     private(set) var depthFromRaycast = false
-    /// 検出を試みた回数と、そのうち被写体が見つかった回数
+    /// 検出を試みた回数と、そのうち植物と判定された回数
     private(set) var detectionAttempts = 0
     private(set) var detectionHits = 0
+    /// 直近の分類結果の上位。しきい値の調整に使う
+    private(set) var topLabels: [(String, Float)] = []
+    /// 植物らしさの合計スコア
+    private(set) var plantScore: Float = 0
     /// 現在の検出間隔（実測に応じて伸びる）
     var currentDetectionInterval: TimeInterval { detectionInterval }
 
     /// 奥行きが取れなかったときの既定距離（D3-a）
     private let fallbackDistance: Float = 1.2
+
+    /// 植物と認めるスコアのしきい値。
+    /// 診断表示で実際のスコアを見ながら調整する
+    var plantScoreThreshold: Float = 0.10
+
+    /// 被写体が小さすぎるものは無視する。画面に占める面積の下限
+    private let minSubjectArea: CGFloat = 0.03
+
+    /// 画面座標の平滑化の強さ（0に近いほど強く効く）。
+    /// ARKit の姿勢推定は微細に揺れており、毎フレーム素直に投影すると
+    /// 吹き出しがぶれて見える
+    private let smoothing: CGFloat = 0.25
+    private var smoothedPoint: CGPoint?
 
     private weak var arView: ARView?
     private var model: AppModel?
@@ -111,7 +128,10 @@ final class SceneController: NSObject {
         subject = .none
         worldPosition = nil
         bubbleScreenPoint = nil
+        smoothedPoint = nil
         lastDetectionAt = 0
+        detectionAttempts = 0
+        detectionHits = 0
     }
 
     // MARK: - パネル
@@ -141,16 +161,28 @@ final class SceneController: NSObject {
         isDetecting = true
 
         let pixelBuffer = frame.capturedImage
+        let threshold = plantScoreThreshold
+        let minArea = minSubjectArea
+
         Task.detached(priority: .userInitiated) { [weak self] in
             let started = CFAbsoluteTimeGetCurrent()
-            let box = Self.findSubjectBoundingBox(in: pixelBuffer, orientation: .right)
+            let outcome = Self.analyze(pixelBuffer: pixelBuffer, orientation: .right)
             let elapsed = CFAbsoluteTimeGetCurrent() - started
+
             await MainActor.run {
                 guard let self else { return }
                 self.isDetecting = false
                 self.adaptInterval(lastDuration: elapsed)
                 self.detectionAttempts += 1
-                guard let box, case .none = self.subject else { return }
+                self.topLabels = outcome.labels
+                self.plantScore = outcome.plantScore
+
+                guard case .none = self.subject else { return }
+                // 植物と判定できないものにはアンカーを打たない。
+                // 前景マスクは「主要被写体」を返すだけで、それが植物かは見ていない。
+                guard outcome.plantScore >= threshold else { return }
+                guard let box = outcome.box, box.width * box.height >= minArea else { return }
+
                 self.detectionHits += 1
                 self.placeAnchor(forNormalizedBox: box)
                 self.subject = .plant
@@ -168,24 +200,63 @@ final class SceneController: NSObject {
         detectionInterval = min(maxDetectionInterval, max(minDetectionInterval, target))
     }
 
-    /// 主要被写体の矩形を求める。
+    struct Analysis {
+        let box: CGRect?
+        let labels: [(String, Float)]
+        let plantScore: Float
+    }
+
+    /// 植物を表す分類ラベルの語。Vision の分類器の識別子に部分一致で当てる
+    nonisolated private static let plantKeywords = [
+        "plant", "flower", "leaf", "leaves", "foliage", "tree", "shrub",
+        "succulent", "cactus", "botanical", "vegetation", "herb", "bloom",
+        "petal", "flowerpot", "houseplant", "sprout", "seedling", "bud",
+        "sunflower", "garden",
+    ]
+
+    /// 画像を分析する。
     ///
-    /// 汎用の物体検出ではなく前景マスクを使うのは、鉢植えのように
-    /// 「画面の主役が1つだけある」場面で最も安定するため。
-    nonisolated private static func findSubjectBoundingBox(
-        in pixelBuffer: CVPixelBuffer,
+    /// **2段構えにしているのが要点。**
+    ///   1. 分類で「植物が写っているか」を判定する
+    ///   2. 前景マスクで「どこにあるか」を求める
+    ///
+    /// 前景マスクは主要被写体の位置を返すだけで、それが植物かどうかを
+    /// 一切見ていない。分類を挟まないと、机でも壁でも人でも吹き出しが出る。
+    nonisolated private static func analyze(
+        pixelBuffer: CVPixelBuffer,
         orientation: CGImagePropertyOrientation
-    ) -> CGRect? {
+    ) -> Analysis {
         let handler = VNImageRequestHandler(
             cvPixelBuffer: pixelBuffer, orientation: orientation, options: [:])
-        let request = VNGenerateForegroundInstanceMaskRequest()
-        guard (try? handler.perform([request])) != nil,
-            let result = request.results?.first,
+
+        let classify = VNClassifyImageRequest()
+        let mask = VNGenerateForegroundInstanceMaskRequest()
+        try? handler.perform([classify, mask])
+
+        // --- 植物らしさ ---
+        let observations = (classify.results ?? [])
+            .sorted { $0.confidence > $1.confidence }
+        let labels = observations.prefix(4).map { ($0.identifier, $0.confidence) }
+
+        var score: Float = 0
+        for o in observations where o.confidence > 0.02 {
+            let id = o.identifier.lowercased()
+            if plantKeywords.contains(where: { id.contains($0) }) {
+                score += o.confidence
+            }
+        }
+
+        // --- 位置 ---
+        var box: CGRect?
+        if let result = mask.results?.first,
             let instance = result.allInstances.first,
-            let mask = try? result.generateScaledMaskForImage(
+            let scaled = try? result.generateScaledMaskForImage(
                 forInstances: IndexSet(integer: instance), from: handler)
-        else { return nil }
-        return boundingBox(ofMask: mask)
+        {
+            box = boundingBox(ofMask: scaled)
+        }
+
+        return Analysis(box: box, labels: Array(labels), plantScore: score)
     }
 
     /// マスク画像から、値が立っている領域の外接矩形を正規化座標で返す
@@ -265,6 +336,9 @@ extension SceneController: ARSessionDelegate {
             self.updateDiagnostics(frame)
             self.project(frame)
             guard case .none = self.subject else { return }
+            // トラッキングが安定するまで検出しない。
+            // 初期化中に打ったアンカーは位置が信用できず、吹き出しが飛ぶ原因になる。
+            guard case .normal = frame.camera.trackingState else { return }
             let now = frame.timestamp
             guard now - self.lastDetectionAt >= self.detectionInterval else { return }
             self.lastDetectionAt = now
@@ -308,10 +382,20 @@ extension SceneController: ARSessionDelegate {
         // 背面に回り込んだら出さない
         guard simd_dot(toAnchor, forward) > 0, let projected = arView.project(world) else {
             bubbleScreenPoint = nil
+            smoothedPoint = nil
             return
         }
         anchorDistance = simd_length(toAnchor)
-        bubbleScreenPoint = projected
+
+        // 姿勢推定の微細な揺れがそのまま出るとぶれて見えるので、平滑化する
+        if let previous = smoothedPoint {
+            smoothedPoint = CGPoint(
+                x: previous.x + (projected.x - previous.x) * smoothing,
+                y: previous.y + (projected.y - previous.y) * smoothing)
+        } else {
+            smoothedPoint = projected
+        }
+        bubbleScreenPoint = smoothedPoint
     }
 }
 

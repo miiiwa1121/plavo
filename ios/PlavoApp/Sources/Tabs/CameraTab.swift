@@ -195,6 +195,31 @@ struct CameraTab: View {
                 scene.bubbleScreenPoint.map {
                     String(format: "(%.0f, %.0f)", $0.x, $0.y)
                 } ?? "画面外")
+
+            if !scene.topLabels.isEmpty {
+                Divider().padding(.vertical, 2)
+                Text("分類")
+                    .foregroundStyle(.secondary)
+                ForEach(scene.topLabels, id: \.0) { label, confidence in
+                    HStack {
+                        Text(label).lineLimit(1)
+                        Spacer()
+                        Text(String(format: "%.3f", confidence))
+                    }
+                }
+            }
+
+            Divider().padding(.vertical, 2)
+            HStack {
+                Text("しきい値").foregroundStyle(.secondary)
+                Slider(
+                    value: Binding(
+                        get: { Double(scene.plantScoreThreshold) },
+                        set: { scene.plantScoreThreshold = Float($0) }
+                    ), in: 0...0.5)
+                Text(String(format: "%.2f", scene.plantScoreThreshold))
+                    .frame(width: 38, alignment: .trailing)
+            }
         }
         .font(.caption2.monospaced())
         .frame(maxWidth: .infinity, alignment: .leading)
