@@ -6,6 +6,12 @@ dist/
 build/
 *.tsbuildinfo
 
+# Swift / Xcode
+.build/
+DerivedData/
+*.xcodeproj/xcuserdata/
+*.xcworkspace/xcuserdata/
+
 # 環境変数（APIキーを含む）
 .env
 .env.local
