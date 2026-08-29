@@ -38,20 +38,42 @@ function collect(): Entry[] {
 }
 
 const entries = collect();
-let violations = 0;
 const byFile = new Map<string, number>();
+const violationLines: { entry: Entry; detail: string }[] = [];
+const warningLines: { entry: Entry; detail: string }[] = [];
 
 console.log(`セリフ ${entries.length} 本を検証します\n`);
 
 for (const e of entries) {
-  const vs = checkDialogue(e.line);
   byFile.set(e.file, (byFile.get(e.file) ?? 0) + 1);
-  if (vs.length > 0) {
-    violations += vs.length;
-    console.log(`  違反  [${e.group}] 「${e.line}」`);
-    for (const v of vs) console.log(`        ${v.rule} — ${v.detail}`);
+  for (const v of checkDialogue(e.line)) {
+    const row = { entry: e, detail: `${v.rule} — ${v.detail}` };
+    if (v.severity === "violation") violationLines.push(row);
+    else warningLines.push(row);
   }
 }
+
+console.log("--- 違反（必ず直す） ---");
+if (violationLines.length === 0) {
+  console.log("  なし");
+} else {
+  for (const { entry, detail } of violationLines) {
+    console.log(`  [${entry.group}] 「${entry.line}」`);
+    console.log(`      ${detail}`);
+  }
+}
+
+console.log("\n--- 警告（人が判断する） ---");
+if (warningLines.length === 0) {
+  console.log("  なし");
+} else {
+  for (const { entry, detail } of warningLines) {
+    console.log(`  [${entry.group}] 「${entry.line}」`);
+    console.log(`      ${detail}`);
+  }
+}
+
+console.log("");
 
 console.log("--- ファイル別 ---");
 for (const [file, count] of byFile) console.log(`  ${file.padEnd(16)} ${count} 本`);
@@ -91,5 +113,8 @@ console.log("\n--- 文字数 ---");
 console.log(`  平均 ${avg.toFixed(1)}字 / 最長 ${max}字（上限40字）`);
 
 console.log("\n" + "=".repeat(48));
-console.log(`規則違反: ${violations} 件 / 重複: ${dupes.length} 件`);
-if (violations > 0 || dupes.length > 0) process.exit(1);
+console.log(
+  `違反 ${violationLines.length} 件 / 警告 ${warningLines.length} 件 / 重複 ${dupes.length} 件`,
+);
+// 警告では落とさない。人が判断するものなので、CIで止める性質のものではない
+if (violationLines.length > 0 || dupes.length > 0) process.exit(1);
