@@ -1,0 +1,23 @@
+# 依存関係
+node_modules/
+
+# ビルド成果物
+dist/
+build/
+*.tsbuildinfo
+
+# 環境変数（APIキーを含む）
+.env
+.env.local
+.env.*.local
+
+# 検証用の画像。実物の写真は容量が大きいためコミットしない
+server/fixtures/images/*
+!server/fixtures/images/.gitkeep
+
+# macOS
+.DS_Store
+
+# エディタ
+.vscode/
+.idea/

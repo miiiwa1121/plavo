@@ -7,6 +7,8 @@ plavo の設計ドキュメント一覧。要件は [../requirements/](../requir
 | [architecture.md](./architecture.md) | 全体構成、レイヤ、データフロー、外部依存 | 初版 |
 | [domain-model.md](./domain-model.md) | エンティティ、導出指標、生育ステージ、親密度 | 初版 |
 | [diagnosis-prompt.md](./diagnosis-prompt.md) | 診断プロンプトの設計、出力スキーマ、セリフの生成方針、検証方法 | 初版 |
+| [exhibition.md](./exhibition.md) | 展示の設計。3つの価値、4セクション、完全オフライン化 | 初版 |
+| [gadget-interface.md](./gadget-interface.md) | ガジェットとアプリの契約。**ハード担当に渡す仕様書** | 初版 |
 | screen-design.md | 画面設計、状態遷移、UI仕様 | 未作成（UI設計待ち） |
 
 ## 設計の前提
@@ -34,6 +36,14 @@ plavo の設計ドキュメント一覧。要件は [../requirements/](../requir
 1. [architecture.md](./architecture.md) — 何がどこで動くか
 2. [domain-model.md](./domain-model.md) — 何を持ち、何を持たないか
 3. [diagnosis-prompt.md](./diagnosis-prompt.md) — Claude に何を渡し、何を返させるか
+
+## 展示に向けた設計
+
+D32〜D35 により、展示の形が固まった。
+
+- 伝えたい価値を3つに分け、展示物を分ける（[exhibition.md](./exhibition.md)）
+- **当日は完全オフライン。**AIは実行時ではなく制作時に使う
+- ガジェットはハード担当が製作。契約は [gadget-interface.md](./gadget-interface.md)
 
 ## 検証できる状態
 

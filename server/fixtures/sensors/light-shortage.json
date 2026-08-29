@@ -1,0 +1,956 @@
+{
+  "scenario": "light-shortage",
+  "plant": {
+    "id": "plant-001",
+    "name": "ひまり",
+    "species": "ミニひまわり",
+    "plantedAt": "2026-07-26T09:00:00+09:00",
+    "gadgetId": "gadget-001"
+  },
+  "priorGdd": 604,
+  "now": "2026-08-29T19:00:00+09:00",
+  "lastWateredAt": "2026-08-28T19:00:00+09:00",
+  "readings": [
+    {
+      "measuredAt": "2026-08-29T00:00:00+09:00",
+      "lightLux": 0,
+      "soilMoisture": 48,
+      "temperature": 22,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T00:10:00+09:00",
+      "lightLux": 0,
+      "soilMoisture": 48,
+      "temperature": 22,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T00:20:00+09:00",
+      "lightLux": 0,
+      "soilMoisture": 47.9,
+      "temperature": 22,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T00:30:00+09:00",
+      "lightLux": 0,
+      "soilMoisture": 47.9,
+      "temperature": 22,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T00:40:00+09:00",
+      "lightLux": 0,
+      "soilMoisture": 47.9,
+      "temperature": 22,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T00:50:00+09:00",
+      "lightLux": 0,
+      "soilMoisture": 47.8,
+      "temperature": 22,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T01:00:00+09:00",
+      "lightLux": 0,
+      "soilMoisture": 47.8,
+      "temperature": 22,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T01:10:00+09:00",
+      "lightLux": 0,
+      "soilMoisture": 47.8,
+      "temperature": 22,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T01:20:00+09:00",
+      "lightLux": 0,
+      "soilMoisture": 47.7,
+      "temperature": 22,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T01:30:00+09:00",
+      "lightLux": 0,
+      "soilMoisture": 47.7,
+      "temperature": 22,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T01:40:00+09:00",
+      "lightLux": 0,
+      "soilMoisture": 47.7,
+      "temperature": 22,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T01:50:00+09:00",
+      "lightLux": 0,
+      "soilMoisture": 47.6,
+      "temperature": 22,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T02:00:00+09:00",
+      "lightLux": 0,
+      "soilMoisture": 47.6,
+      "temperature": 22,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T02:10:00+09:00",
+      "lightLux": 0,
+      "soilMoisture": 47.5,
+      "temperature": 22,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T02:20:00+09:00",
+      "lightLux": 0,
+      "soilMoisture": 47.5,
+      "temperature": 22,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T02:30:00+09:00",
+      "lightLux": 0,
+      "soilMoisture": 47.5,
+      "temperature": 22,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T02:40:00+09:00",
+      "lightLux": 0,
+      "soilMoisture": 47.4,
+      "temperature": 22,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T02:50:00+09:00",
+      "lightLux": 0,
+      "soilMoisture": 47.4,
+      "temperature": 22,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T03:00:00+09:00",
+      "lightLux": 0,
+      "soilMoisture": 47.4,
+      "temperature": 22,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T03:10:00+09:00",
+      "lightLux": 0,
+      "soilMoisture": 47.3,
+      "temperature": 22,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T03:20:00+09:00",
+      "lightLux": 0,
+      "soilMoisture": 47.3,
+      "temperature": 22,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T03:30:00+09:00",
+      "lightLux": 0,
+      "soilMoisture": 47.3,
+      "temperature": 22,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T03:40:00+09:00",
+      "lightLux": 0,
+      "soilMoisture": 47.2,
+      "temperature": 22,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T03:50:00+09:00",
+      "lightLux": 0,
+      "soilMoisture": 47.2,
+      "temperature": 22,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T04:00:00+09:00",
+      "lightLux": 0,
+      "soilMoisture": 47.2,
+      "temperature": 22,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T04:10:00+09:00",
+      "lightLux": 0,
+      "soilMoisture": 47.1,
+      "temperature": 22.1,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T04:20:00+09:00",
+      "lightLux": 0,
+      "soilMoisture": 47.1,
+      "temperature": 22.2,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T04:30:00+09:00",
+      "lightLux": 0,
+      "soilMoisture": 47.1,
+      "temperature": 22.3,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T04:40:00+09:00",
+      "lightLux": 0,
+      "soilMoisture": 47,
+      "temperature": 22.4,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T04:50:00+09:00",
+      "lightLux": 0,
+      "soilMoisture": 47,
+      "temperature": 22.5,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T05:00:00+09:00",
+      "lightLux": 0,
+      "soilMoisture": 47,
+      "temperature": 22.6,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T05:10:00+09:00",
+      "lightLux": 0,
+      "soilMoisture": 46.9,
+      "temperature": 22.7,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T05:20:00+09:00",
+      "lightLux": 59,
+      "soilMoisture": 46.9,
+      "temperature": 22.8,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T05:30:00+09:00",
+      "lightLux": 353,
+      "soilMoisture": 46.8,
+      "temperature": 22.9,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T05:40:00+09:00",
+      "lightLux": 646,
+      "soilMoisture": 46.8,
+      "temperature": 23,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T05:50:00+09:00",
+      "lightLux": 938,
+      "soilMoisture": 46.8,
+      "temperature": 23.1,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T06:00:00+09:00",
+      "lightLux": 1229,
+      "soilMoisture": 46.7,
+      "temperature": 23.2,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T06:10:00+09:00",
+      "lightLux": 1518,
+      "soilMoisture": 46.7,
+      "temperature": 23.3,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T06:20:00+09:00",
+      "lightLux": 1804,
+      "soilMoisture": 46.7,
+      "temperature": 23.4,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T06:30:00+09:00",
+      "lightLux": 2087,
+      "soilMoisture": 46.6,
+      "temperature": 23.5,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T06:40:00+09:00",
+      "lightLux": 2367,
+      "soilMoisture": 46.6,
+      "temperature": 23.6,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T06:50:00+09:00",
+      "lightLux": 2644,
+      "soilMoisture": 46.6,
+      "temperature": 23.7,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T07:00:00+09:00",
+      "lightLux": 2915,
+      "soilMoisture": 46.5,
+      "temperature": 23.8,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T07:10:00+09:00",
+      "lightLux": 3182,
+      "soilMoisture": 46.5,
+      "temperature": 23.9,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T07:20:00+09:00",
+      "lightLux": 3444,
+      "soilMoisture": 46.5,
+      "temperature": 24,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T07:30:00+09:00",
+      "lightLux": 3701,
+      "soilMoisture": 46.4,
+      "temperature": 24.1,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T07:40:00+09:00",
+      "lightLux": 3951,
+      "soilMoisture": 46.4,
+      "temperature": 24.2,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T07:50:00+09:00",
+      "lightLux": 4195,
+      "soilMoisture": 46.4,
+      "temperature": 24.3,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T08:00:00+09:00",
+      "lightLux": 4432,
+      "soilMoisture": 46.3,
+      "temperature": 24.4,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T08:10:00+09:00",
+      "lightLux": 4662,
+      "soilMoisture": 46.3,
+      "temperature": 24.4,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T08:20:00+09:00",
+      "lightLux": 4885,
+      "soilMoisture": 46.3,
+      "temperature": 24.5,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T08:30:00+09:00",
+      "lightLux": 5099,
+      "soilMoisture": 46.2,
+      "temperature": 24.6,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T08:40:00+09:00",
+      "lightLux": 5305,
+      "soilMoisture": 46.2,
+      "temperature": 24.7,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T08:50:00+09:00",
+      "lightLux": 5503,
+      "soilMoisture": 46.1,
+      "temperature": 24.8,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T09:00:00+09:00",
+      "lightLux": 5692,
+      "soilMoisture": 46.1,
+      "temperature": 24.8,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T09:10:00+09:00",
+      "lightLux": 5871,
+      "soilMoisture": 46.1,
+      "temperature": 24.9,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T09:20:00+09:00",
+      "lightLux": 6041,
+      "soilMoisture": 46,
+      "temperature": 25,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T09:30:00+09:00",
+      "lightLux": 6201,
+      "soilMoisture": 46,
+      "temperature": 25,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T09:40:00+09:00",
+      "lightLux": 6351,
+      "soilMoisture": 46,
+      "temperature": 25.1,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T09:50:00+09:00",
+      "lightLux": 6491,
+      "soilMoisture": 45.9,
+      "temperature": 25.2,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T10:00:00+09:00",
+      "lightLux": 6620,
+      "soilMoisture": 45.9,
+      "temperature": 25.2,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T10:10:00+09:00",
+      "lightLux": 6739,
+      "soilMoisture": 45.9,
+      "temperature": 25.3,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T10:20:00+09:00",
+      "lightLux": 6846,
+      "soilMoisture": 45.8,
+      "temperature": 25.4,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T10:30:00+09:00",
+      "lightLux": 6943,
+      "soilMoisture": 45.8,
+      "temperature": 25.4,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T10:40:00+09:00",
+      "lightLux": 7028,
+      "soilMoisture": 45.8,
+      "temperature": 25.5,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T10:50:00+09:00",
+      "lightLux": 7102,
+      "soilMoisture": 45.7,
+      "temperature": 25.5,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T11:00:00+09:00",
+      "lightLux": 7164,
+      "soilMoisture": 45.7,
+      "temperature": 25.6,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T11:10:00+09:00",
+      "lightLux": 7215,
+      "soilMoisture": 45.7,
+      "temperature": 25.6,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T11:20:00+09:00",
+      "lightLux": 7254,
+      "soilMoisture": 45.6,
+      "temperature": 25.7,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T11:30:00+09:00",
+      "lightLux": 7281,
+      "soilMoisture": 45.6,
+      "temperature": 25.7,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T11:40:00+09:00",
+      "lightLux": 7296,
+      "soilMoisture": 45.6,
+      "temperature": 25.7,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T11:50:00+09:00",
+      "lightLux": 7300,
+      "soilMoisture": 45.5,
+      "temperature": 25.8,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T12:00:00+09:00",
+      "lightLux": 7291,
+      "soilMoisture": 45.5,
+      "temperature": 25.8,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T12:10:00+09:00",
+      "lightLux": 7271,
+      "soilMoisture": 45.4,
+      "temperature": 25.8,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T12:20:00+09:00",
+      "lightLux": 7239,
+      "soilMoisture": 45.4,
+      "temperature": 25.9,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T12:30:00+09:00",
+      "lightLux": 7196,
+      "soilMoisture": 45.4,
+      "temperature": 25.9,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T12:40:00+09:00",
+      "lightLux": 7140,
+      "soilMoisture": 45.3,
+      "temperature": 25.9,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T12:50:00+09:00",
+      "lightLux": 7074,
+      "soilMoisture": 45.3,
+      "temperature": 25.9,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T13:00:00+09:00",
+      "lightLux": 6995,
+      "soilMoisture": 45.3,
+      "temperature": 26,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T13:10:00+09:00",
+      "lightLux": 6905,
+      "soilMoisture": 45.2,
+      "temperature": 26,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T13:20:00+09:00",
+      "lightLux": 6805,
+      "soilMoisture": 45.2,
+      "temperature": 26,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T13:30:00+09:00",
+      "lightLux": 6693,
+      "soilMoisture": 45.2,
+      "temperature": 26,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T13:40:00+09:00",
+      "lightLux": 6570,
+      "soilMoisture": 45.1,
+      "temperature": 26,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T13:50:00+09:00",
+      "lightLux": 6436,
+      "soilMoisture": 45.1,
+      "temperature": 26,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T14:00:00+09:00",
+      "lightLux": 6292,
+      "soilMoisture": 45.1,
+      "temperature": 26,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T14:10:00+09:00",
+      "lightLux": 6138,
+      "soilMoisture": 45,
+      "temperature": 26,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T14:20:00+09:00",
+      "lightLux": 5974,
+      "soilMoisture": 45,
+      "temperature": 26,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T14:30:00+09:00",
+      "lightLux": 5800,
+      "soilMoisture": 45,
+      "temperature": 26,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T14:40:00+09:00",
+      "lightLux": 5617,
+      "soilMoisture": 44.9,
+      "temperature": 26,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T14:50:00+09:00",
+      "lightLux": 5425,
+      "soilMoisture": 44.9,
+      "temperature": 26,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T15:00:00+09:00",
+      "lightLux": 5224,
+      "soilMoisture": 44.9,
+      "temperature": 26,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T15:10:00+09:00",
+      "lightLux": 5014,
+      "soilMoisture": 44.8,
+      "temperature": 25.9,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T15:20:00+09:00",
+      "lightLux": 4797,
+      "soilMoisture": 44.8,
+      "temperature": 25.9,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T15:30:00+09:00",
+      "lightLux": 4571,
+      "soilMoisture": 44.7,
+      "temperature": 25.9,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T15:40:00+09:00",
+      "lightLux": 4338,
+      "soilMoisture": 44.7,
+      "temperature": 25.9,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T15:50:00+09:00",
+      "lightLux": 4098,
+      "soilMoisture": 44.7,
+      "temperature": 25.8,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T16:00:00+09:00",
+      "lightLux": 3852,
+      "soilMoisture": 44.6,
+      "temperature": 25.8,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T16:10:00+09:00",
+      "lightLux": 3599,
+      "soilMoisture": 44.6,
+      "temperature": 25.8,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T16:20:00+09:00",
+      "lightLux": 3340,
+      "soilMoisture": 44.6,
+      "temperature": 25.7,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T16:30:00+09:00",
+      "lightLux": 3076,
+      "soilMoisture": 44.5,
+      "temperature": 25.7,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T16:40:00+09:00",
+      "lightLux": 2807,
+      "soilMoisture": 44.5,
+      "temperature": 25.7,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T16:50:00+09:00",
+      "lightLux": 2534,
+      "soilMoisture": 44.5,
+      "temperature": 25.6,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T17:00:00+09:00",
+      "lightLux": 2256,
+      "soilMoisture": 44.4,
+      "temperature": 25.6,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T17:10:00+09:00",
+      "lightLux": 1974,
+      "soilMoisture": 44.4,
+      "temperature": 25.5,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T17:20:00+09:00",
+      "lightLux": 1690,
+      "soilMoisture": 44.4,
+      "temperature": 25.5,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T17:30:00+09:00",
+      "lightLux": 1403,
+      "soilMoisture": 44.3,
+      "temperature": 25.4,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T17:40:00+09:00",
+      "lightLux": 1113,
+      "soilMoisture": 44.3,
+      "temperature": 25.4,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T17:50:00+09:00",
+      "lightLux": 822,
+      "soilMoisture": 44.3,
+      "temperature": 25.3,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T18:00:00+09:00",
+      "lightLux": 529,
+      "soilMoisture": 44.2,
+      "temperature": 25.2,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T18:10:00+09:00",
+      "lightLux": 235,
+      "soilMoisture": 44.2,
+      "temperature": 25.2,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T18:20:00+09:00",
+      "lightLux": 0,
+      "soilMoisture": 44.2,
+      "temperature": 25.1,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T18:30:00+09:00",
+      "lightLux": 0,
+      "soilMoisture": 44.1,
+      "temperature": 25,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T18:40:00+09:00",
+      "lightLux": 0,
+      "soilMoisture": 44.1,
+      "temperature": 25,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T18:50:00+09:00",
+      "lightLux": 0,
+      "soilMoisture": 44,
+      "temperature": 24.9,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    },
+    {
+      "measuredAt": "2026-08-29T19:00:00+09:00",
+      "lightLux": 0,
+      "soilMoisture": 44,
+      "temperature": 24.8,
+      "humidity": 58,
+      "nutrientEc": 1.4
+    }
+  ],
+  "lastObservation": {
+    "observedAt": "2026-08-26T18:00:00+09:00",
+    "plantDetected": true,
+    "stage": "trueLeaf",
+    "appearances": [
+      "茎がやや細長い"
+    ],
+    "heightCm": 31,
+    "confidence": "medium",
+    "dialogue": "なんだか薄暗い気がするなあ"
+  },
+  "expectation": {
+    "stage": "trueLeaf",
+    "appearanceHints": [
+      "茎が細く長い（徒長）",
+      "葉の色が薄い",
+      "葉が上を向いている"
+    ],
+    "dialogueIntent": "光を求めている。水は足りているので水の話はしない。日陰が続いたことに触れる",
+    "confidence": "medium"
+  }
+}

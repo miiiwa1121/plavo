@@ -1,0 +1,66 @@
+{
+  "id": "timeline",
+  "description": "時系列パネル用。各パネルにカメラを向けたとき、その日に植物が言ったこととして再生する（D33 セクション3）",
+  "usedIn": ["section3"],
+  "speciesDependent": true,
+  "species": "mini-sunflower",
+  "note": "植物種が変わったら差し替える。パネルの枚数と、それぞれが表す時点は未確定",
+  "panels": [
+    {
+      "key": "sprout",
+      "label": "発芽",
+      "dayLabel": "6日目",
+      "intent": "はじめて外に出た驚き。まだ言葉が少ない",
+      "lines": ["やっと外に出られた", "まぶしい"]
+    },
+    {
+      "key": "trueLeaf-early",
+      "label": "本葉が出た",
+      "dayLabel": "14日目",
+      "intent": "成長の実感。上を向いている",
+      "lines": ["葉っぱが増えたよ", "背が伸びてきた気がする"]
+    },
+    {
+      "key": "trueLeaf-thirsty",
+      "label": "水切れ",
+      "dayLabel": "23日目",
+      "intent": "この日は苦しかった。時系列の中に谷を作る",
+      "lines": ["のどが渇いたよ…", "きのうから、ずっと"]
+    },
+    {
+      "key": "trueLeaf-recovered",
+      "label": "水やりの翌日",
+      "dayLabel": "24日目",
+      "intent": "回復。前日との差分に触れる。お世話が効いたことが伝わる",
+      "lines": ["昨日のおかげで、すっかり元気", "また上を向けるようになった"]
+    },
+    {
+      "key": "bud",
+      "label": "つぼみ",
+      "dayLabel": "38日目",
+      "intent": "予感。まだ何ができるか自分でも分かっていない",
+      "lines": ["なにか、できはじめてる", "もうすぐだと思う"]
+    },
+    {
+      "key": "bloom",
+      "label": "開花",
+      "dayLabel": "45日目",
+      "intent": "山場。誇らしさ。ここが時系列のクライマックス",
+      "lines": ["咲いたよ", "ちゃんと咲けた"]
+    },
+    {
+      "key": "seedSet",
+      "label": "結実",
+      "dayLabel": "62日目",
+      "intent": "静けさと満足。天寿の兆し（D30）",
+      "lines": ["種ができた", "役目は果たせたかな"]
+    },
+    {
+      "key": "withered",
+      "label": "枯死",
+      "dayLabel": "78日目",
+      "intent": "終わり。言葉が減る。責めも嘆きもしない（D18-a / D30）",
+      "lines": ["……", "ここまでこられて、よかった"]
+    }
+  ]
+}
