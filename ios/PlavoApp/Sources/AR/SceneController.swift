@@ -35,9 +35,19 @@ final class SceneController: NSObject {
 
     /// 検出を試みる間隔。毎フレームは走らせない（D4-a）。
     /// 植物の姿は数分から数日変わらないため、頻繁に走らせても得るものがない。
-    private let detectionInterval: TimeInterval = 0.5
+    ///
+    /// 実測に応じて間隔を伸ばす。前景マスクの検出は端末によって処理時間が
+    /// 大きく違い、iPhone 11（A13）では新しい端末より重い。固定間隔にすると
+    /// 遅い端末で描画を圧迫し、吹き出しの追従がカクつく。
+    /// **検出の頻度を落としてでも描画のフレームレートを守る**（非機能要件 §2.2）。
+    private var detectionInterval: TimeInterval = 0.5
+    private let minDetectionInterval: TimeInterval = 0.4
+    private let maxDetectionInterval: TimeInterval = 2.0
     private var lastDetectionAt: TimeInterval = 0
     private var isDetecting = false
+
+    /// 直近の検出にかかった時間。デバッグと間隔の調整に使う
+    private(set) var lastDetectionDuration: TimeInterval = 0
 
     /// 奥行きが取れなかったときの既定距離（D3-a）
     private let fallbackDistance: Float = 1.2
@@ -107,15 +117,28 @@ final class SceneController: NSObject {
 
         let pixelBuffer = frame.capturedImage
         Task.detached(priority: .userInitiated) { [weak self] in
+            let started = CFAbsoluteTimeGetCurrent()
             let box = Self.findSubjectBoundingBox(in: pixelBuffer, orientation: .right)
+            let elapsed = CFAbsoluteTimeGetCurrent() - started
             await MainActor.run {
                 guard let self else { return }
                 self.isDetecting = false
+                self.adaptInterval(lastDuration: elapsed)
                 guard let box, case .none = self.subject else { return }
                 self.placeAnchor(forNormalizedBox: box)
                 self.subject = .plant
             }
         }
+    }
+
+    /// 検出にかかった時間から次の間隔を決める。
+    ///
+    /// 検出が重い端末では間隔を空け、描画に余裕を残す。
+    /// 目安として、検出が占める割合を全体の3分の1以下に保つ。
+    private func adaptInterval(lastDuration: TimeInterval) {
+        lastDetectionDuration = lastDuration
+        let target = lastDuration * 3
+        detectionInterval = min(maxDetectionInterval, max(minDetectionInterval, target))
     }
 
     /// 主要被写体の矩形を求める。
