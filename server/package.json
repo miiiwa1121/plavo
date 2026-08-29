@@ -10,7 +10,10 @@
     "gen:fixtures": "tsx src/fixtures/generate.ts",
     "test:metrics": "tsx src/domain/metrics.test.ts",
     "verify": "tsx src/verify/run.ts",
-    "check:dialogues": "tsx src/content/check.ts"
+    "check:dialogues": "tsx src/content/check.ts",
+    "sensor": "tsx src/sensor/server.ts",
+    "mock:gadget": "tsx src/sensor/mock-gadget.ts",
+    "test:sensor": "tsx src/sensor/store.test.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.121.0",

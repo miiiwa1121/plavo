@@ -39,5 +39,9 @@ struct RootView: View {
                 MyPageTab(model: model)
             }
         }
+        // 起動したら自動でセンサーに繋ぎにいく。
+        // 展示で説明員が毎回タップするのは現実的でない。
+        // 繋がらなくてもモックで動くため、失敗しても体験は止まらない（F-10）。
+        .task { model.startSensor() }
     }
 }

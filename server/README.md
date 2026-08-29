@@ -4,13 +4,13 @@ plavo の TypeScript 実装。**D34で展示が完全オフラインになった
 
 | 役割 | 状態 |
 |---|---|
+| **センサー中継** | **動作する。**ガジェットからのデータをPCで受けてスマホに配る（D35） |
 | **セリフの規則検証** | 使う。`content/dialogues/` を機械的にふるいに掛ける |
 | **センサーのサンプルデータ生成** | 使う。展示の再生データになる |
 | **導出指標の計算** | 検証済み。iOSアプリへ移植する際の参照と期待値 |
-| センサー中継（将来） | ガジェットからのデータをPCで受けてスマホに配る |
 | 診断クライアント / 検証ハーネス | **当面使わない**（APIキーが要る）。製品版の設計記録として残す |
 
-**当日はここのコードを実行しない。**セリフは事前に用意して iOS アプリに埋め込む。
+**セリフの生成には当日このコードを使わない**（D34）。ただし**センサー中継は当日も動かす。**PC上でガジェットからの値を受け、スマホに配る。
 
 ## セットアップ
 
@@ -37,6 +37,9 @@ export ANTHROPIC_API_KEY=sk-ant-...
 | `npm run verify` | 全シナリオで診断を実行する |
 | `npm run verify -- --scenario healthy` | 1シナリオだけ実行する |
 | `npm run verify -- --repeat 5` | 同じ入力を5回投げて言い回しの多様性を見る |
+| `npm run sensor` | **センサー中継サーバーを起動する**（展示当日に使う） |
+| `npm run mock:gadget` | モックのガジェット。ハード無しで端から端まで試せる |
+| `npm run test:sensor` | 受信の検証と保管のテスト（API不要） |
 | `npm run check:dialogues` | セリフのプールを規則で検証する（API不要） |
 | `npm run typecheck` | 型検査 |
 
@@ -57,6 +60,11 @@ server/
 │   │   └── client.ts         Claude 呼び出し
 │   ├── content/
 │   │   └── check.ts          セリフのプールを規則で検証する
+│   ├── sensor/
+│   │   ├── server.ts         センサー中継サーバー
+│   │   ├── store.ts          受信の検証と保管
+│   │   ├── store.test.ts     その検証
+│   │   └── mock-gadget.ts    モックのガジェット
 │   ├── fixtures/
 │   │   └── generate.ts       サンプルデータセットの生成
 │   └── verify/
@@ -108,6 +116,41 @@ npm run check:dialogues
 ```
 
 規則違反と重複を機械的に検出する。人が数十本を目視でチェックするより確実。
+
+## センサー中継
+
+ガジェット → USB → PC（ここ）→ ローカルHTTP → スマホ（D35）。
+
+```bash
+# 1. 中継サーバーを起動する
+npm run sensor
+#   → スマホから繋ぐアドレスが表示される
+
+# 2. ハードが無ければ、モックのガジェットを走らせる
+npm run mock:gadget
+#   → Enter を押すと水やりが起きる
+```
+
+アプリ側は**マイページ → センサー**でサーバーのアドレスを設定する。起動時に自動で繋ぎにいく。
+
+| エンドポイント | 用途 |
+|---|---|
+| `POST /sensor` | ガジェットからの受信 |
+| `GET /sensor/latest` | 最新の1点。アプリが1秒ごとに見にくる |
+| `GET /sensor/recent` | 直近N秒分 |
+| `GET /health` | 疎通確認 |
+| `POST /reset` | 記録を消す |
+
+**仕様と合わないペイロードは、何が足りないかを返す。**ハード担当がこのエンドポイントに向けて開発するため。
+
+```json
+{"error":"ペイロードが仕様と合いません","details":[
+  {"field":"gadgetId","reason":"空でない文字列が必要です"},
+  {"field":"soilMoisture.percent","reason":"0〜100 の範囲である必要があります（受信値: 120）"}
+]}
+```
+
+詳細は [../docs/design/gadget-interface.md](../docs/design/gadget-interface.md)。
 
 ## 設計ドキュメント
 

@@ -18,6 +18,36 @@ struct MyPageTab: View {
                 }
 
                 Section {
+                    LabeledContent("状態", value: model.sensor.state.label)
+                    LabeledContent("受信数", value: "\(model.sensor.receivedCount)")
+                    if let p = model.sensor.lastPayload {
+                        LabeledContent(
+                            "土の湿り",
+                            value: String(format: "%.1f%%  (raw %.0f)", p.soilMoisture.percent, p.soilMoisture.raw))
+                        LabeledContent("ガジェット", value: p.gadgetId)
+                    }
+                    HStack {
+                        Text("サーバー")
+                        TextField(
+                            "http://192.168.x.x:8787",
+                            text: Binding(
+                                get: { model.sensor.baseURL },
+                                set: { model.sensor.baseURL = $0 }))
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            .multilineTextAlignment(.trailing)
+                            .font(.callout.monospaced())
+                    }
+                    Button(model.sensor.state == .idle ? "接続する" : "繋ぎ直す") {
+                        model.startSensor()
+                    }
+                } header: {
+                    Text("センサー")
+                } footer: {
+                    Text("起動時に自動で繋ぎにいきます。繋がらなくてもアプリは動きます。実センサーが無いときは、カメラ画面の長押しで出るモック操作を使ってください。")
+                }
+
+                Section {
                     Button("次の来場者のためにリセット", role: .destructive) {
                         showResetConfirm = true
                     }

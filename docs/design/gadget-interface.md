@@ -84,7 +84,9 @@
 
 ## 5. 受信側のエンドポイント（PC経由の場合）
 
-`server/` が以下を提供する。
+**実装済み。**`server/` が以下を提供する。起動は `npm run sensor`。
+
+ハードが無くても `npm run mock:gadget` で端から端まで試せる。
 
 ```
 POST /sensor

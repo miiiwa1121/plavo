@@ -44,5 +44,10 @@ targets:
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
         NSCameraUsageDescription: 植物を観察して、その気持ちを翻訳するためにカメラを使います
+        # センサー中継サーバー（PC）から値を取得するため（D35）。
+        # 会場のWi-Fiは使わず、スマホのテザリングで作ったローカルネットワークに繋ぐ。
+        NSLocalNetworkUsageDescription: 土の湿りを測るセンサーの値を受け取るために、同じネットワーク上の機器と通信します
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
         # 展示中に画面が消えないようにする
         UIRequiresFullScreen: true

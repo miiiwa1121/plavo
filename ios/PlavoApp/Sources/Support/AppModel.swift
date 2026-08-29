@@ -6,6 +6,7 @@ import PlavoCore
 ///
 /// D36 により永続化しない。展示では来場者が入れ替わるたびにリセットするため、
 /// セッションの状態はメモリだけに置く。製品版では SwiftData + CloudKit に載せる。
+@MainActor
 @Observable
 final class AppModel {
 
@@ -25,6 +26,9 @@ final class AppModel {
     /// 実センサーからの値を使っているか。false ならモック
     private(set) var usingRealSensor = false
 
+    /// センサー中継サーバーからの取得。繋がらなくてもアプリは成立する
+    let sensor = SensorClient()
+
     /// 連続した水やりの検出。過湿の帯域はここでのみ選ばれる
     private(set) var consecutiveWatering = false
     private var lastMoisture: Double = initialSoilMoisture
@@ -35,6 +39,18 @@ final class AppModel {
         } catch {
             loadError = "\(error)"
         }
+    }
+
+    /// センサーの取得を始める。値が来たら実センサー扱いに切り替わる
+    func startSensor() {
+        sensor.start { [weak self] payload in
+            self?.updateMoisture(payload.soilMoisture.percent, fromRealSensor: true)
+        }
+    }
+
+    func stopSensor() {
+        sensor.stop()
+        usingRealSensor = false
     }
 
     private static func loadBank() throws -> DialogueBank {
