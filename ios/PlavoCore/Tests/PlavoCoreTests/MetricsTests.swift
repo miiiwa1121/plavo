@@ -48,7 +48,7 @@ final class MetricsTests: XCTestCase {
         let now: Date
         let lastWateredAt: Date?
         let readings: [SensorReading]
-        let lastObservation: Observation?
+        let lastObservation: PlantObservation?
         let expectation: Expectation
     }
 
@@ -70,8 +70,8 @@ final class MetricsTests: XCTestCase {
 
     // MARK: - 生育段階の後戻り防止
 
-    private func observation(_ stage: GrowthStage) -> Observation {
-        Observation(observedAt: Date(), plantDetected: true, stage: stage)
+    private func observation(_ stage: GrowthStage) -> PlantObservation {
+        PlantObservation(observedAt: Date(), plantDetected: true, stage: stage)
     }
 
     func testStageDoesNotGoBackward() {

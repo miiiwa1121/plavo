@@ -54,3 +54,54 @@ server/fixtures/sensors/*.json
 ## PlavoApp（未着手）
 
 `xcodegen` でプロジェクトを生成する方針。ARKit はシミュレータで動かないため、**AR部分の確認には実機が要る。**
+
+## PlavoApp
+
+展示用のアプリ。**タブではなく4セクションの一本道**にしている（D33）。来場者が順番を崩すと何を見ているのか分からなくなるため。製品版のタブ構成（D13）とは別物として扱う。
+
+### ビルド
+
+`.xcodeproj` は `project.yml` からの生成物なので追跡していない。
+
+```bash
+cd ios/PlavoApp
+xcodegen generate
+open PlavoApp.xcodeproj
+```
+
+`xcodegen` は Homebrew で入る（`brew install xcodegen`）。
+
+### 動作確認
+
+```bash
+xcodebuild -project PlavoApp.xcodeproj -scheme PlavoApp \
+  -sdk iphonesimulator -destination 'platform=iOS Simulator,name=iPhone 17' build
+```
+
+起動引数でセクションを指定できる。動作確認と、展示中に説明員が特定のセクションから始めたいときに使う。
+
+```bash
+xcrun simctl launch <device> dev.plavo.PlavoApp -startSection 3
+```
+
+| 値 | セクション |
+|---|---|
+| 0 | 説明 |
+| 1 | 本物の植物（AR） |
+| 2 | 時系列パネル（AR） |
+| 3 | センサー |
+
+### 実機が必要な部分
+
+**ARKit はシミュレータで動かない。**セクション1と4はシミュレータで確認できるが、セクション2（植物の検出とアンカー）とセクション3（パネルの画像トラッキング）は実機でしか確認できない。
+
+セクション3には**印刷したパネルの画像**も要る。AR Resource Group「PanelImages」に登録し、参照画像の名前を `content/dialogues/timeline.json` のパネルキーと一致させる。
+
+### 説明員用の操作
+
+| 操作 | 場所 | 内容 |
+|---|---|---|
+| 長押し1秒 | 画面右上の隅 | リセット確認を出す（L-13） |
+| 長押し1.5秒 | センサー画面の任意の場所 | 水分値のスライダーを表示する |
+
+来場者に数値を見せないため（原則2）、スライダーは隠してある。

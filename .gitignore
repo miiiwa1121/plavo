@@ -9,8 +9,11 @@ build/
 # Swift / Xcode
 .build/
 DerivedData/
-*.xcodeproj/xcuserdata/
 *.xcworkspace/xcuserdata/
+
+# xcodegen の生成物。project.yml を正とする
+ios/PlavoApp/PlavoApp.xcodeproj/
+ios/PlavoApp/Info.plist
 
 # 環境変数（APIキーを含む）
 .env

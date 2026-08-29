@@ -1,0 +1,48 @@
+# xcodegen の設定。.xcodeproj は生成物として扱い、この YAML を正とする。
+# 生成: cd ios/PlavoApp && xcodegen generate
+
+name: PlavoApp
+options:
+  bundleIdPrefix: dev.plavo
+  deploymentTarget:
+    iOS: "18.0"
+  createIntermediateGroups: true
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+
+packages:
+  PlavoCore:
+    path: ../PlavoCore
+
+targets:
+  PlavoApp:
+    type: application
+    platform: iOS
+    sources:
+      - path: Sources
+      # セリフとセンサーの再生データはアプリに同梱する（D34 / D36）。
+      # リポジトリのファイルをフォルダ参照でそのまま入れ、二重管理を避ける。
+      # type: folder にすると青いフォルダ参照になり、ディレクトリ構造ごとコピーされる。
+      - path: ../../content/dialogues
+        buildPhase: resources
+        type: folder
+      - path: ../../server/fixtures/sensors
+        buildPhase: resources
+        type: folder
+    dependencies:
+      - package: PlavoCore
+        product: PlavoCore
+    info:
+      path: Info.plist
+      properties:
+        CFBundleDisplayName: plavo
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        NSCameraUsageDescription: 植物を観察して、その気持ちを翻訳するためにカメラを使います
+        # 展示中に画面が消えないようにする
+        UIRequiresFullScreen: true

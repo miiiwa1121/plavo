@@ -65,8 +65,11 @@ public struct SensorReading: Codable, Sendable, Equatable {
     }
 }
 
-/// 1回の観察の結果（保存する）
-public struct Observation: Codable, Sendable, Equatable {
+/// 1回の観察の結果（保存する）。
+///
+/// 型名を `Observation` にすると Swift 標準の Observation モジュールを隠してしまい、
+/// `@Observable` マクロの展開が壊れる。そのため `PlantObservation` としている。
+public struct PlantObservation: Codable, Sendable, Equatable {
     public let observedAt: Date
     public let plantDetected: Bool
     public let stage: GrowthStage

@@ -131,7 +131,7 @@ public enum Metrics {
 
     /// 個体の生育段階＝観察履歴における最大到達段階。
     /// 例外は withered（枯死）で、これだけは他のどの段階からも遷移しうる。
-    public static func currentStage(_ observations: [Observation]) -> GrowthStage? {
+    public static func currentStage(_ observations: [PlantObservation]) -> GrowthStage? {
         guard let latest = observations.last else { return nil }
         if latest.stage == .withered { return .withered }
 
