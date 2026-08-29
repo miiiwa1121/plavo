@@ -132,6 +132,24 @@ currentStage(plant) = max(observation.stage for observation in observations(plan
 | seedSet | 種を残した | 完全な天寿 |
 | withered | 終わり | — |
 
+## 3.5 植物プロファイル（D17-a）
+
+植物種に依存する知識は `PlantProfile` に切り出し、差し替え式にしている。展示に使う植物が未定のため、種が決まったらプロファイルを1つ書くだけで済む構造にした。
+
+| 項目 | 内容 |
+|---|---|
+| `isAnnual` | 一年草か。false なら枯死をライフサイクルの正常な完結として扱えない |
+| `baseTempC` / `gddToBloom` | GDDの基準温度と開花までの積算温度。null なら開花予測をしない |
+| 適正環境 | 光・土の湿り・気温・湿度・養分の範囲 |
+| `stages` | この植物が取りうる生育段階と説明 |
+| `symptoms` | よくある症状と原因。診断精度に直結する |
+| `character` | 性格の記述。セリフの個性のもとになる |
+| `naturalCompletionStage` | 天寿の判定段階（D30）。null なら到達段階で判定できない |
+
+実装は `server/src/domain/profile.ts`。現時点でミニひまわりとポトスの2種を定義している。
+
+**未解決（L-10）**: 多年草は室内でまず開花しないため `naturalCompletionStage` が null になる。この場合、D30の「天寿のときだけ明示し、不在で察させる」仕組みが機能しない。多年草を選ぶ場合は天寿の判定基準を別に定める必要がある。
+
 ## 4. 導出指標（保存しない純粋関数）
 
 すべて一次データから計算する。セリフ生成時に計算してClaudeへ渡す文脈になるが、**画面には出さない**（原則2）。
@@ -150,7 +168,7 @@ currentStage(plant) = max(observation.stage for observation in observations(plan
 | `intimacy(plant, observations)` | 観察履歴 | 0〜100 | 親密度（D12） |
 | `deathCause(plant, observations, readings)` | 全履歴 | DeathCause | 死因判定（D30） |
 
-### ひまわりのGDD基準値
+### GDD基準値（ミニひまわりの場合）
 
 | 到達点 | 積算温度 |
 |---|---|

@@ -9,7 +9,8 @@
     "typecheck": "tsc --noEmit",
     "gen:fixtures": "tsx src/fixtures/generate.ts",
     "test:metrics": "tsx src/domain/metrics.test.ts",
-    "verify": "tsx src/verify/run.ts"
+    "verify": "tsx src/verify/run.ts",
+    "check:dialogues": "tsx src/content/check.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.121.0",
