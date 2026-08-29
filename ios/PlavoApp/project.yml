@@ -41,8 +41,12 @@ targets:
       properties:
         CFBundleDisplayName: plavo
         UILaunchScreen: {}
+        # 上下逆さまでも使えるようにする（C-1）。
+        # 低い位置の植物を撮るときなど、端末を反転させることがある。
+        # 横向きは含めない。吹き出しのレイアウトが縦持ち前提のため。
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
         NSCameraUsageDescription: 植物を観察して、その気持ちを翻訳するためにカメラを使います
         # センサー中継サーバー（PC）から値を取得するため（D35）。
         # 会場のWi-Fiは使わず、スマホのテザリングで作ったローカルネットワークに繋ぐ。

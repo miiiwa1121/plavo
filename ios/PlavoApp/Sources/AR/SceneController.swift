@@ -163,10 +163,13 @@ final class SceneController: NSObject {
         let pixelBuffer = frame.capturedImage
         let threshold = plantScoreThreshold
         let minArea = minSubjectArea
+        // 端末の向きに合わせて画像の向きを決める。
+        // 縦持ち固定で決め打ちすると、上下逆さまにしたときに検出が働かない。
+        let orientation = Self.imageOrientation(for: arView?.window?.windowScene)
 
         Task.detached(priority: .userInitiated) { [weak self] in
             let started = CFAbsoluteTimeGetCurrent()
-            let outcome = Self.analyze(pixelBuffer: pixelBuffer, orientation: .right)
+            let outcome = Self.analyze(pixelBuffer: pixelBuffer, orientation: orientation)
             let elapsed = CFAbsoluteTimeGetCurrent() - started
 
             await MainActor.run {
@@ -204,6 +207,22 @@ final class SceneController: NSObject {
         let box: CGRect?
         let labels: [(String, Float)]
         let plantScore: Float
+    }
+
+    /// ARKit が渡してくる画像はカメラの物理的な向きのままなので、
+    /// 画面の向きに合わせて回転の指定を変える必要がある。
+    ///
+    /// 縦持ちだけを想定して `.right` に決め打ちすると、端末を上下逆さまに
+    /// したときに検出が働かなくなる（C-1）。
+    @MainActor
+    static func imageOrientation(for scene: UIWindowScene?) -> CGImagePropertyOrientation {
+        switch scene?.interfaceOrientation {
+        case .portrait: .right
+        case .portraitUpsideDown: .left
+        case .landscapeLeft: .down
+        case .landscapeRight: .up
+        default: .right
+        }
     }
 
     /// 植物を表す分類ラベルの語。Vision の分類器の識別子に部分一致で当てる
