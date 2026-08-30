@@ -16,6 +16,14 @@ struct CameraTab: View {
 
     /// 撮影の結果を短く知らせる
     @State private var captureNotice: String?
+
+    /// シャッターの種類。左右にスライドして切り替える
+    @State private var shutterMode: ShutterMode = .capture
+    /// 植物の追加で止めている1枚。確認のあいだ画面に残す
+    @State private var pendingCapture: CapturedPlant?
+    /// いま新しい株を迎えている最中か。
+    /// 2株目以降は「まだ誰もいない」条件では拾えないため、これで見分ける
+    @State private var addingPlant = false
     @Environment(\.scenePhase) private var scenePhase
 
     /// 未登録の植物を検出したときの名前入力（D9）。
@@ -89,8 +97,9 @@ struct CameraTab: View {
             line = ""
             isNaming = false
         case .plant:
-            // まだ誰も登録していなければ、出会いから始める（D9）
-            if model.store.selectedPlant == nil {
+            // まだ誰もいないとき、または新しい株を迎えているときは
+            // 出会いから始める（D9）
+            if addingPlant || model.store.selectedPlant == nil {
                 line = "はじめまして。名前をつけてくれる？"
                 isNaming = true
                 nameFieldFocused = true
@@ -147,32 +156,48 @@ struct CameraTab: View {
 
     // MARK: - 撮影
 
-    /// カメラボタン。撮った写真は今日の日記に入る（D26）。
+    /// シャッター。種類を左右のスライドで切り替える。
     ///
-    /// 映像フレームの保存ではなく、ARKit に高解像度の1枚を撮らせている。
-    /// 記録に残る写真の質は、画面で見える映像の質とは別に決まる。
+    /// 撮った写真は今日の日記に入る（D26）。映像フレームの保存ではなく、
+    /// ARKit に高解像度の1枚を撮らせている。
     private var shutter: some View {
         VStack {
             Spacer()
-            HStack {
-                Spacer()
-                Button {
-                    Task { await capture() }
-                } label: {
-                    ZStack {
-                        Circle().fill(.white.opacity(0.25))
-                            .frame(width: 72, height: 72)
-                        Circle().stroke(.white, lineWidth: 3)
-                            .frame(width: 72, height: 72)
-                        Circle().fill(.white).frame(width: 58, height: 58)
-                    }
-                }
-                .disabled(scene.isCapturing)
-                .opacity(scene.isCapturing ? 0.5 : 1)
-                Spacer()
-            }
+            ShutterBar(
+                mode: $shutterMode,
+                onFire: { Task { await fire() } },
+                disabled: scene.isCapturing
+            )
             .padding(.bottom, 28)
         }
+    }
+
+    private func fire() async {
+        switch shutterMode {
+        case .capture: await capture()
+        case .addPlant: await captureForAdd()
+        }
+    }
+
+    /// 迎えるための1枚を撮り、そこから植物を探す
+    private func captureForAdd() async {
+        guard let data = await scene.capturePhoto(), let image = UIImage(data: data) else {
+            captureNotice = "撮れませんでした"
+            return
+        }
+        let analysis = SceneController.analyze(image: image)
+        pendingCapture = CapturedPlant(
+            image: image, box: analysis?.box, plantScore: analysis?.plantScore ?? 0)
+    }
+
+    /// 確認を終えて、通常の画面に戻る。
+    /// 戻ったところで植物が「はじめまして」と話しかけてくる
+    private func startTalking() {
+        pendingCapture = nil
+        addingPlant = true
+        shutterMode = .capture
+        scene.redetect()
+        line = ""
     }
 
     private func capture() async {
@@ -325,6 +350,7 @@ struct CameraTab: View {
         model.store.register(name: name, species: model.profile.displayName)
         nameDraft = ""
         isNaming = false
+        addingPlant = false
         nameFieldFocused = false
         line = model.greeting() ?? ""
         Task {

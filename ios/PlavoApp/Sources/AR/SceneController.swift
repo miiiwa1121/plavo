@@ -386,7 +386,7 @@ final class SceneController: NSObject {
         detectionInterval = min(maxDetectionInterval, max(minDetectionInterval, target))
     }
 
-    struct Analysis {
+    struct Analysis: Sendable {
         let box: CGRect?
         let labels: [(String, Float)]
         let plantScore: Float
@@ -415,6 +415,39 @@ final class SceneController: NSObject {
         "petal", "flowerpot", "houseplant", "sprout", "seedling", "bud",
         "sunflower", "garden",
     ]
+
+    /// 撮った1枚から植物を探す。
+    ///
+    /// 生の映像ではなく静止画に対して走らせる。**確認の画面で
+    /// 「この植物を見ている」ことを枠で示す**ために使う（植物の追加）。
+    nonisolated static func analyze(image: UIImage) -> Analysis? {
+        guard let cg = image.cgImage else { return nil }
+        let handler = VNImageRequestHandler(cgImage: cg, options: [:])
+
+        let classify = VNClassifyImageRequest()
+        let mask = VNGenerateForegroundInstanceMaskRequest()
+        try? handler.perform([classify, mask])
+
+        let observations = (classify.results ?? []).sorted { $0.confidence > $1.confidence }
+        var score: Float = 0
+        for o in observations where o.confidence > 0.02 {
+            let id = o.identifier.lowercased()
+            if plantKeywords.contains(where: { id.contains($0) }) { score += o.confidence }
+        }
+
+        var box: CGRect?
+        if let result = mask.results?.first,
+            let instance = result.allInstances.first,
+            let scaled = try? result.generateScaledMaskForImage(
+                forInstances: IndexSet(integer: instance), from: handler)
+        {
+            box = boundingBox(ofMask: scaled)
+        }
+        return Analysis(
+            box: box,
+            labels: observations.prefix(4).map { ($0.identifier, $0.confidence) },
+            plantScore: score)
+    }
 
     /// 画像を分析する。
     ///
