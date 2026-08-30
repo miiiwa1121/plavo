@@ -106,19 +106,24 @@ public struct Plant: Codable, Sendable, Identifiable, Equatable {
     public var species: String
     public var plantedAt: Date
     public var gadgetId: String?
+    /// アイコンにする写真への参照。実体は PlantStore が持つ。
+    /// 未設定なら生育段階に応じた記号を出す
+    public var avatarRef: String?
 
     public init(
         id: UUID = UUID(),
         name: String,
         species: String,
         plantedAt: Date,
-        gadgetId: String? = nil
+        gadgetId: String? = nil,
+        avatarRef: String? = nil
     ) {
         self.id = id
         self.name = name
         self.species = species
         self.plantedAt = plantedAt
         self.gadgetId = gadgetId
+        self.avatarRef = avatarRef
     }
 }
 

@@ -1,3 +1,4 @@
+import PhotosUI
 import PlavoCore
 import SwiftUI
 
@@ -54,11 +55,7 @@ struct MyPlantTab: View {
 
     private func row(_ plant: Plant) -> some View {
         HStack(spacing: 14) {
-            Image(systemName: symbol(for: plant))
-                .font(.system(size: 30))
-                .foregroundStyle(.green.gradient)
-                .frame(width: 52, height: 52)
-                .background(.green.opacity(0.12), in: Circle())
+            PlantAvatar(plant: plant, model: model, size: 52)
 
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
@@ -85,16 +82,6 @@ struct MyPlantTab: View {
         .padding(.vertical, 4)
     }
 
-    /// 生育段階で見た目を変える。数値ではなく形で伝える（原則2）
-    private func symbol(for plant: Plant) -> String {
-        switch model.store.stage(of: plant.id) {
-        case .bloom, .seedSet: "sun.max.fill"
-        case .bud: "circle.fill"
-        case .withered: "leaf"
-        default: "leaf.fill"
-        }
-    }
-
     /// 枯れた株を現在進行形で書かない。
     /// 「一緒にいて78日」は生きている株の言い方であり、看取った株には合わない。
     private func summary(_ plant: Plant) -> String {
@@ -107,6 +94,46 @@ struct MyPlantTab: View {
     }
 }
 
+/// 個体のアイコン。
+///
+/// 写真が設定されていればそれを丸く切り抜き、無ければ生育段階に応じた記号を出す。
+/// 段階で見た目が変わるので、数値を出さずに状態が伝わる（原則2）。
+struct PlantAvatar: View {
+    let plant: Plant
+    let model: AppModel
+    let size: CGFloat
+
+    var body: some View {
+        Group {
+            if let ref = plant.avatarRef,
+                let data = model.store.image(ref),
+                let image = UIImage(data: data)
+            {
+                Color.clear
+                    .overlay { Image(uiImage: image).resizable().scaledToFill() }
+            } else {
+                Color.green.opacity(0.12)
+                    .overlay {
+                        Image(systemName: Self.symbol(model.store.stage(of: plant.id)))
+                            .font(.system(size: size * 0.55))
+                            .foregroundStyle(.green.gradient)
+                    }
+            }
+        }
+        .frame(width: size, height: size)
+        .clipShape(Circle())
+    }
+
+    static func symbol(_ stage: GrowthStage?) -> String {
+        switch stage {
+        case .bloom, .seedSet: "sun.max.fill"
+        case .bud: "circle.fill"
+        case .withered: "leaf"
+        default: "leaf.fill"
+        }
+    }
+}
+
 /// 個体の詳細。
 ///
 /// 数値を並べない。何を言っていたか、どこまで育ったかを見せる。
@@ -115,6 +142,7 @@ struct PlantDetailView: View {
     let plantId: UUID
 
     @State private var showRemoveConfirm = false
+    @State private var avatarItem: PhotosPickerItem?
     @Environment(\.dismiss) private var dismiss
 
     private var plant: Plant? { model.store.plant(plantId) }
@@ -122,6 +150,28 @@ struct PlantDetailView: View {
     var body: some View {
         List {
             if let plant {
+                Section {
+                    HStack(spacing: 16) {
+                        PlantAvatar(plant: plant, model: model, size: 84)
+                        VStack(alignment: .leading, spacing: 6) {
+                            PhotosPicker(selection: $avatarItem, matching: .images) {
+                                Label(
+                                    plant.avatarRef == nil ? "写真を設定" : "写真を変える",
+                                    systemImage: "photo")
+                                .font(.callout)
+                            }
+                            if plant.avatarRef != nil {
+                                Button("写真を外す", role: .destructive) {
+                                    model.store.removeAvatar(plantId)
+                                }
+                                .font(.caption)
+                            }
+                        }
+                        Spacer()
+                    }
+                    .padding(.vertical, 6)
+                }
+
                 Section {
                     LabeledContent("種類", value: plant.species)
                     LabeledContent("出会った日", value: format(plant.plantedAt))
@@ -196,6 +246,16 @@ struct PlantDetailView: View {
         }
         .navigationTitle(plant?.name ?? "")
         .navigationBarTitleDisplayMode(.inline)
+        .onChange(of: avatarItem) { _, item in
+            guard let item else { return }
+            Task {
+                guard let data = try? await item.loadTransferable(type: Data.self) else { return }
+                await MainActor.run {
+                    model.store.setAvatar(data, for: plantId)
+                    avatarItem = nil
+                }
+            }
+        }
         .confirmationDialog(
             "本当に削除しますか", isPresented: $showRemoveConfirm, titleVisibility: .visible
         ) {

@@ -200,6 +200,21 @@ final class PlantStore {
         plants[i].name = name
     }
 
+    /// アイコンの写真を差し替える。前のものは捨てる
+    func setAvatar(_ data: Data, for plantId: UUID) {
+        guard let i = plants.firstIndex(where: { $0.id == plantId }) else { return }
+        if let old = plants[i].avatarRef { images[old] = nil }
+        let ref = UUID().uuidString
+        images[ref] = data
+        plants[i].avatarRef = ref
+    }
+
+    func removeAvatar(_ plantId: UUID) {
+        guard let i = plants.firstIndex(where: { $0.id == plantId }) else { return }
+        if let old = plants[i].avatarRef { images[old] = nil }
+        plants[i].avatarRef = nil
+    }
+
     func updateSpecies(_ plantId: UUID, to species: String) {
         guard let i = plants.firstIndex(where: { $0.id == plantId }) else { return }
         plants[i].species = species
@@ -214,6 +229,7 @@ final class PlantStore {
 
     func remove(_ plantId: UUID) {
         guard canRemove(plantId) else { return }
+        if let avatar = plant(plantId)?.avatarRef { images[avatar] = nil }
         plants.removeAll { $0.id == plantId }
         observations[plantId] = nil
         diary.removeAll { $0.plantId == plantId }
@@ -337,8 +353,20 @@ final class PlantStore {
         diary.filter { $0.plantId == plantId }
     }
 
+    /// 一緒にいた日数。
+    ///
+    /// **看取った株は、その日で数えを止める。**死後も日数が増え続けるのは、
+    /// 植物を人と同等に扱うという軸（D18-a）と合わない。
     func daysTogether(_ plant: Plant) -> Int {
-        max(0, Calendar.current.dateComponents([.day], from: plant.plantedAt, to: Date()).day ?? 0)
+        let end: Date
+        if stage(of: plant.id) == .withered,
+            let last = observations(of: plant.id).last?.observedAt
+        {
+            end = last
+        } else {
+            end = Date()
+        }
+        return max(0, Calendar.current.dateComponents([.day], from: plant.plantedAt, to: end).day ?? 0)
     }
 
     /// 個体の生育段階＝観察履歴における最大到達段階（Metrics に委譲）
