@@ -255,6 +255,23 @@ struct CameraTab: View {
     ///   吹き出し      … 座標が nil なら、アンカーはあるが画面外か背面にある
     private var diagnostics: some View {
         VStack(alignment: .leading, spacing: 3) {
+            row("映像", scene.selectedVideoFormat + (scene.hdrEnabled ? "  HDR" : ""))
+            HStack {
+                Text("画質").foregroundStyle(.secondary)
+                Spacer()
+                Picker(
+                    "画質",
+                    selection: Binding(
+                        get: { scene.videoQuality },
+                        set: { scene.videoQuality = $0 })
+                ) {
+                    ForEach(SceneController.VideoQuality.allCases, id: \.self) { q in
+                        Text(q.label).tag(q)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .frame(width: 130)
+            }
             row("トラッキング", scene.trackingDescription)
             row("特徴点", "\(scene.featurePointCount)")
             row(

@@ -70,6 +70,36 @@ final class SceneController: NSObject {
     /// 現在の検出間隔（実測に応じて伸びる）
     var currentDetectionInterval: TimeInterval { detectionInterval }
 
+    /// 選んだ映像形式。画質の確認に使う
+    private(set) var selectedVideoFormat = "—"
+    private(set) var hdrEnabled = false
+
+    /// 映像の質。
+    ///
+    /// **高解像度は検出とトラッキングの負荷を上げる。**iPhone 11 で
+    /// 追従がカクつくようなら balanced に落とす。実機で見比べられるよう、
+    /// 診断パネルから切り替えられる。
+    enum VideoQuality: String, CaseIterable {
+        /// 対応する中で最も高い解像度
+        case max
+        /// ARKit が既定で選ぶ形式。トラッキングとの釣り合いを取ったもの
+        case balanced
+
+        var label: String {
+            switch self {
+            case .max: "最高"
+            case .balanced: "標準"
+            }
+        }
+    }
+
+    var videoQuality: VideoQuality {
+        didSet {
+            UserDefaults.standard.set(videoQuality.rawValue, forKey: "videoQuality")
+            restart()
+        }
+    }
+
     /// 奥行きが取れなかったときの既定距離（D3-a）
     private let fallbackDistance: Float = 1.2
 
@@ -92,6 +122,12 @@ final class SceneController: NSObject {
 
     // MARK: - 起動
 
+    override init() {
+        let raw = UserDefaults.standard.string(forKey: "videoQuality") ?? VideoQuality.max.rawValue
+        videoQuality = VideoQuality(rawValue: raw) ?? .max
+        super.init()
+    }
+
     func bind(model: AppModel) {
         self.model = model
         referenceImageCount = Self.referenceImages()?.count ?? 0
@@ -108,6 +144,24 @@ final class SceneController: NSObject {
         let config = ARWorldTrackingConfiguration()
         config.planeDetection = []
         config.environmentTexturing = .none
+
+        // **映像の質を上げる。**
+        //
+        // ARKit は既定でトラッキングを優先した控えめな形式を選ぶため、
+        // 明示しないと端末のカメラ性能を使い切れない。
+        // 対応する中で最も解像度の高い形式を選び、同じ解像度なら
+        // フレームレートが高いほうを取る。
+        if videoQuality == .max, let best = Self.bestVideoFormat() {
+            config.videoFormat = best
+        }
+        selectedVideoFormat = Self.describe(config.videoFormat)
+
+        // HDR が使える形式なら有効にする。逆光の植物で効く
+        if config.videoFormat.isVideoHDRSupported {
+            config.videoHDRAllowed = true
+            hdrEnabled = true
+        }
+
         if let images = Self.referenceImages() {
             config.detectionImages = images
             // 同時に1枚だけ追う。来場者は1枚ずつ順に見るため
@@ -116,11 +170,38 @@ final class SceneController: NSObject {
         view.session.run(config, options: [.resetTracking, .removeExistingAnchors])
     }
 
+    /// 対応する中で最も条件のよい映像形式。
+    ///
+    /// 解像度を第一に、同じなら滑らかなほうを選ぶ。
+    /// **高解像度はトラッキングと検出の負荷を上げる**ため、
+    /// iPhone 11 では実測して必要なら見直す（device-setup.md §3）。
+    static func bestVideoFormat() -> ARConfiguration.VideoFormat? {
+        ARWorldTrackingConfiguration.supportedVideoFormats.max { a, b in
+            let pa = a.imageResolution.width * a.imageResolution.height
+            let pb = b.imageResolution.width * b.imageResolution.height
+            if pa != pb { return pa < pb }
+            return a.framesPerSecond < b.framesPerSecond
+        }
+    }
+
+    static func describe(_ format: ARConfiguration.VideoFormat) -> String {
+        let w = Int(format.imageResolution.width)
+        let h = Int(format.imageResolution.height)
+        return "\(w)x\(h) @\(format.framesPerSecond)fps"
+    }
+
     func stop() {
         arView?.session.pause()
         subject = .none
         worldPosition = nil
         bubbleScreenPoint = nil
+    }
+
+    /// 映像形式を変えたときなど、セッションを張り直す
+    private func restart() {
+        guard let arView else { return }
+        redetect()
+        attach(to: arView)
     }
 
     /// アンカーを捨てて、もう一度検出からやり直す。検証で繰り返し試すときに使う
