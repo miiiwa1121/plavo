@@ -94,6 +94,12 @@ struct MyPlantTab: View {
     }
 }
 
+/// 切り抜き画面へ渡すための包み
+struct PickedImage: Identifiable {
+    let id = UUID()
+    let image: UIImage
+}
+
 /// 個体のアイコン。
 ///
 /// 写真が設定されていればそれを丸く切り抜き、無ければ生育段階に応じた記号を出す。
@@ -143,6 +149,8 @@ struct PlantDetailView: View {
 
     @State private var showRemoveConfirm = false
     @State private var avatarItem: PhotosPickerItem?
+    /// 選んだ写真。切り抜き画面に渡す
+    @State private var cropTarget: PickedImage?
     @Environment(\.dismiss) private var dismiss
 
     private var plant: Plant? { model.store.plant(plantId) }
@@ -150,26 +158,29 @@ struct PlantDetailView: View {
     var body: some View {
         List {
             if let plant {
+                // トップはアイコンだけ。操作は右下の「+」に寄せる
                 Section {
-                    HStack(spacing: 16) {
-                        PlantAvatar(plant: plant, model: model, size: 84)
-                        VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Spacer()
+                        ZStack(alignment: .bottomTrailing) {
+                            PlantAvatar(plant: plant, model: model, size: 132)
                             PhotosPicker(selection: $avatarItem, matching: .images) {
-                                Label(
-                                    plant.avatarRef == nil ? "写真を設定" : "写真を変える",
-                                    systemImage: "photo")
-                                .font(.callout)
+                                Image(systemName: "plus")
+                                    .font(.system(size: 16, weight: .bold))
+                                    .foregroundStyle(.white)
+                                    .frame(width: 38, height: 38)
+                                    .background(Circle().fill(Color.accentColor))
+                                    .overlay(
+                                        Circle().stroke(
+                                            Color(uiColor: .systemGroupedBackground), lineWidth: 3))
                             }
-                            if plant.avatarRef != nil {
-                                Button("写真を外す", role: .destructive) {
-                                    model.store.removeAvatar(plantId)
-                                }
-                                .font(.caption)
-                            }
+                            .offset(x: 4, y: 4)
                         }
                         Spacer()
                     }
-                    .padding(.vertical, 6)
+                    .padding(.vertical, 14)
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
                 }
 
                 Section {
@@ -238,6 +249,10 @@ struct PlantDetailView: View {
                         .disabled(model.store.selectedPlantId == plantId)
                     }
 
+                    if plant.avatarRef != nil {
+                        Button("アイコンの写真を外す") { model.store.removeAvatar(plantId) }
+                    }
+
                     if model.store.canRemove(plantId) {
                         Button("削除する", role: .destructive) { showRemoveConfirm = true }
                     }
@@ -249,11 +264,19 @@ struct PlantDetailView: View {
         .onChange(of: avatarItem) { _, item in
             guard let item else { return }
             Task {
-                guard let data = try? await item.loadTransferable(type: Data.self) else { return }
+                guard let data = try? await item.loadTransferable(type: Data.self),
+                    let image = UIImage(data: data)
+                else { return }
                 await MainActor.run {
-                    model.store.setAvatar(data, for: plantId)
+                    // そのまま丸く切ると狙った場所が入らない。範囲を選ばせる
+                    cropTarget = PickedImage(image: image)
                     avatarItem = nil
                 }
+            }
+        }
+        .sheet(item: $cropTarget) { picked in
+            AvatarCropView(image: picked.image) { data in
+                model.store.setAvatar(data, for: plantId)
             }
         }
         .confirmationDialog(
