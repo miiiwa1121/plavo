@@ -108,6 +108,16 @@ final class PlantStore {
                         text: Self.seededText(for: panel),
                         quotedDialogue: panel.lines.first,
                         author: .auto))
+            } else if let ordinary = Self.ordinaryText(day: day) {
+                // 段階の変わり目ではないが、何か書いた日
+                diary.append(
+                    DiaryEntry(
+                        plantId: plant.id,
+                        date: date,
+                        stage: reachedStage,
+                        dayLabel: "\(day)日目",
+                        text: ordinary,
+                        author: .user))
             } else {
                 // お休みした日
                 diary.append(
@@ -132,6 +142,30 @@ final class PlantStore {
     /// 「45日目」から 45 を取り出す
     private static func day(from label: String) -> Int? {
         Int(label.prefix(while: \.isNumber))
+    }
+
+    /// 段階の変わり目ではない、ふつうの日の日記。
+    ///
+    /// **お休みが長く続きすぎないように置く。**
+    /// timeline.json のパネルは8日分しかないため、そのままだと
+    /// 16日連続で空白になる区間ができ、実際に育てている人の日記に見えない。
+    /// 毎日は書かないが、そこそこ書く——という現実の粒度に寄せる。
+    static func ordinaryText(day: Int) -> String? {
+        switch day {
+        case 3: "まだ何も出てこない。土は湿っている。"
+        case 9: "芽がまっすぐ立ってきた。ひょろっとしている。"
+        case 18: "葉が四枚になった。窓際に移した。"
+        case 28: "水やりの間隔がつかめてきた。三日にいちどくらい。"
+        case 33: "背が伸びて少し傾いている。支柱を立てた。"
+        case 41: "つぼみが膨らんだ気がする。毎日見てしまう。"
+        case 50: "満開。写真ばかり撮っている。"
+        case 55: "花びらの色が少し褪せてきた。"
+        case 58: "下のほうの葉が黄色くなりはじめた。"
+        case 66: "種が硬くなってきた。触ると分かる。"
+        case 70: "茎が乾いてきている。水をやっても戻らない。"
+        case 74: "葉がほとんど落ちた。種だけがしっかりしている。"
+        default: nil
+        }
     }
 
     /// 仕込みの日記の本文。植物が言ったことを受けて、飼い主が書いた体で綴る

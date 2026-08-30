@@ -104,13 +104,16 @@ private struct DiaryTile: View {
                 }
                 Spacer()
                 HStack {
-                    if let day = entry.dayLabel {
-                        Text(day)
-                            .font(.caption2.weight(.semibold))
-                            // お休みの日は背景が明るいので、白文字では読めない
-                            .foregroundStyle(entry.isRest ? AnyShapeStyle(.tertiary) : AnyShapeStyle(.white))
-                            .shadow(radius: entry.isRest ? 0 : 2)
-                    }
+                    // 日記は全体で一つなので、株ごとの「N日目」ではなく日付を出す。
+                    // 複数の株が混ざったとき、「1日目」の隣に「78日目」が並ぶと
+                    // 何の日数なのか分からなくなる。
+                    Text(Self.shortDate(entry.date))
+                        .font(.caption2.weight(.semibold))
+                        // お休みの日は背景が明るいので、白文字では読めない
+                        .foregroundStyle(
+                            entry.isRest ? AnyShapeStyle(.tertiary) : AnyShapeStyle(.white)
+                        )
+                        .shadow(radius: entry.isRest ? 0 : 2)
                     Spacer()
                     if !entry.isRest && entry.author == .user {
                         Image(systemName: "pencil")
@@ -170,6 +173,14 @@ private struct DiaryTile: View {
         case .withered: Color(red: 0.52, green: 0.46, blue: 0.40)
         case nil: Color.gray
         }
+    }
+
+    /// タイルは狭いので短く出す
+    static func shortDate(_ date: Date) -> String {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "ja_JP")
+        f.dateFormat = "M/d"
+        return f.string(from: date)
     }
 
     static func symbol(_ stage: GrowthStage?) -> String {
@@ -244,8 +255,12 @@ private struct DiaryCard: View {
 
     private func header(_ entry: DiaryEntry) -> some View {
         HStack(spacing: 8) {
-            Text(entry.dayLabel ?? format(entry.date))
+            // カードには両方出す。日付で位置が分かり、N日目で成長が分かる
+            Text(format(entry.date))
                 .font(.caption.weight(.semibold))
+            if let day = entry.dayLabel {
+                Text(day).font(.caption).foregroundStyle(.secondary)
+            }
             if let stage = entry.stage {
                 Text(stage.label).font(.caption).foregroundStyle(.secondary)
             }
