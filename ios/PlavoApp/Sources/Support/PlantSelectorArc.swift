@@ -91,17 +91,21 @@ struct PlantSelectorArc: View {
                 // **帯にも同じずらしを掛けないと、動かしたときに離れる。**
                 // **円を丸ごと描き、画面の縁で切る。**
                 // 帯にすると縁から浮いてしまい、貼り付いて見えない。
-                // **素材で塗る。**タブバーの本体と同じで、背後の映像を
-                // 取り込んでぼかし、明暗モードにも追従する。
+                // **タブバーと同じものを直接使う。**
                 //
-                // **`.opacity()` は掛けない。**掛けると別レイヤーとして
-                // 合成され、背後の取り込みが切れて色が変わらなくなる。
-                // 濃さを変えたいときは、素材の種類を選ぶか、
-                // 上に薄い色を重ねる。
-                ArcSegment(radius: radius, centerX: centerX)
-                    .fill(.ultraThinMaterial)
+                // SwiftUI の `.ultraThinMaterial` は、ARKit が Metal で描く
+                // カメラ映像を取り込めず、背景が変わっても色が動かなかった。
+                // タブバーの実体である UIVisualEffectView を使うと、
+                // 同じ経路で背後を拾う。
+                //
+                // 濃さは SwiftUI の `.opacity()` ではなくビュー自体の
+                // 透明度で指定する。前者は別レイヤーとして合成され、
+                // 背後の取り込みが切れる。
+                MaterialBlur(style: .systemUltraThinMaterial, alpha: 0.82)
+                    .mask { ArcSegment(radius: radius, centerX: centerX) }
                     .frame(width: openRadius + openCenterX + 12, height: geo.size.height)
                     .offset(y: barOffset)
+                    .allowsHitTesting(false)
 
                 ForEach(Array(plants.enumerated()), id: \.element.id) { index, plant in
                     nameLabel(plant)
@@ -277,6 +281,30 @@ struct PlantSelectorArc: View {
             guard !Task.isCancelled else { return }
             expanded = false
         }
+    }
+}
+
+/// タブバーが使っているぼかしそのもの。
+///
+/// SwiftUI の `.ultraThinMaterial` は、ARKit が Metal で描くカメラ映像を
+/// 取り込めない。UIKit のぼかしを直接置くと、同じ経路で背後を拾う。
+///
+/// 濃さは `alpha` で指定する。SwiftUI の `.opacity()` を使うと別レイヤー
+/// として合成され、背後の取り込みが切れて色が動かなくなる。
+private struct MaterialBlur: UIViewRepresentable {
+    var style: UIBlurEffect.Style = .systemUltraThinMaterial
+    var alpha: CGFloat = 1
+
+    func makeUIView(context: Context) -> UIVisualEffectView {
+        let view = UIVisualEffectView(effect: UIBlurEffect(style: style))
+        view.alpha = alpha
+        view.isUserInteractionEnabled = false
+        return view
+    }
+
+    func updateUIView(_ view: UIVisualEffectView, context: Context) {
+        view.effect = UIBlurEffect(style: style)
+        view.alpha = alpha
     }
 }
 
