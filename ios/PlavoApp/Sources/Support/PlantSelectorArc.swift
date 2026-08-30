@@ -98,10 +98,11 @@ struct PlantSelectorArc: View {
                 // タブバーの実体である UIVisualEffectView を使うと、
                 // 同じ経路で背後を拾う。
                 //
-                // 濃さは SwiftUI の `.opacity()` ではなくビュー自体の
-                // 透明度で指定する。前者は別レイヤーとして合成され、
-                // 背後の取り込みが切れる。
-                MaterialBlur(style: .systemUltraThinMaterial, alpha: 0.82)
+                // 濃さを足で調整しない。素のまま置いて、タブバーと
+                // 同じ見え方になるかを先に確かめる。
+                // タブバーやナビゲーションバーが使っているのはこれ。
+                // 暗いところでは黒く沈み、明るいところでは持ち上がる
+                MaterialBlur(style: .systemChromeMaterial)
                     .mask { ArcSegment(radius: radius, centerX: centerX) }
                     .frame(width: openRadius + openCenterX + 12, height: geo.size.height)
                     .offset(y: barOffset)
