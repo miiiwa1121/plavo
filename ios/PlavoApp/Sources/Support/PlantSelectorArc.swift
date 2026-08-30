@@ -91,13 +91,15 @@ struct PlantSelectorArc: View {
                 // **帯にも同じずらしを掛けないと、動かしたときに離れる。**
                 // **円を丸ごと描き、画面の縁で切る。**
                 // 帯にすると縁から浮いてしまい、貼り付いて見えない。
+                // **素材で塗る。**タブバーの本体と同じで、背後の映像を
+                // 取り込んでぼかし、明暗モードにも追従する。
+                //
+                // **`.opacity()` は掛けない。**掛けると別レイヤーとして
+                // 合成され、背後の取り込みが切れて色が変わらなくなる。
+                // 濃さを変えたいときは、素材の種類を選ぶか、
+                // 上に薄い色を重ねる。
                 ArcSegment(radius: radius, centerX: centerX)
-                    // **素材で塗る。**タブバーと同じで、背後の映像と
-                    // 明暗モードに応じて色が変わる。単色で塗ると板になる。
-                    // そのままだと濃いので、少しだけ透かす
                     .fill(.ultraThinMaterial)
-                    .opacity(0.82)
-                    .shadow(color: .black.opacity(0.18), radius: 7)
                     .frame(width: openRadius + openCenterX + 12, height: geo.size.height)
                     .offset(y: barOffset)
 
