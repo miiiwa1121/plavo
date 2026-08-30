@@ -176,6 +176,9 @@ struct PlantDetailView: View {
                             }
                             .offset(x: 2, y: 2)
                         }
+                        // 「+」はアイコンの外へ少しはみ出す。
+                        // その分の逃げを取らないと、行の縁で切られる
+                        .padding(4)
                         Spacer()
                     }
                     .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
