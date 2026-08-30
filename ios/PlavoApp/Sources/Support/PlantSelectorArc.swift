@@ -19,10 +19,10 @@ struct PlantSelectorArc: View {
 
     /// 押し始めてから開くまでの間。
     /// 触れた瞬間に開くと長押しの感じがなく、意図せず開いてしまう
-    private let pressBeforeOpen: Duration = .milliseconds(250)
+    private let pressBeforeOpen: Duration = .milliseconds(200)
     /// 開いたあと、触られなければ自動で閉じるまでの時間。
     /// 長く残ると映像の邪魔になる
-    private let idleBeforeCollapse: Duration = .seconds(0.4)
+    private let idleBeforeCollapse: Duration = .seconds(0.3)
 
     /// 縦の置き場所。画面中央からのずれ。持ち方に合わせて動かせる
     /// 未設定なら 0。`object(forKey:) as? Double` は型が合わず取りこぼす
@@ -54,9 +54,9 @@ struct PlantSelectorArc: View {
     /// 半径と中心の差が、画面に出っ張る量になる（400-310 なら 90pt）。
     /// 半径を大きくすると弧は緩やかになるが、縦にも広がって映像を覆う。
     /// 出っ張りを保ったまま縦を抑えるには、半径ごと詰める。
-    private let openRadius: CGFloat = 300
+    private let openRadius: CGFloat = 225
     /// 中心の横位置。負の値だけ画面の外に出る
-    private let openCenterX: CGFloat = -210
+    private let openCenterX: CGFloat = -157
     private let maxSpread: Double = 40
 
     private var plants: [Plant] { model.store.plants }
@@ -70,7 +70,7 @@ struct PlantSelectorArc: View {
     private var radius: CGFloat { expanded ? openRadius : closedRadius }
     private var centerX: CGFloat { expanded ? openCenterX : closedCenterX }
     /// 名前を並べる弧の半径。塗りの縁より少し内側に置く
-    private var nameRadius: CGFloat { expanded ? openRadius - 28 : closedRadius * 0.5 }
+    private var nameRadius: CGFloat { expanded ? openRadius - 22 : closedRadius * 0.5 }
     /// 弧のいちばん出っ張るところの横位置
     private var apexX: CGFloat { radius + centerX }
 
@@ -127,8 +127,10 @@ struct PlantSelectorArc: View {
         let selected = plant.id == model.store.selectedPlantId
         return Text(plant.name)
             .font(selected ? .subheadline.weight(.bold) : .caption)
-            // 選択中は黄色。iPhone のズームで現在値が黄色になるのに倣う
-            .foregroundStyle(selected ? AnyShapeStyle(.yellow) : AnyShapeStyle(.white.opacity(0.5)))
+            // 選択中はタブバーと同じ色。アプリの中で「いま選ばれているもの」の
+            // 示し方を1つに揃える
+            .foregroundStyle(
+                selected ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.white.opacity(0.5)))
             .lineLimit(1)
             .fixedSize()
     }
