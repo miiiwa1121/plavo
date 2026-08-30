@@ -14,6 +14,12 @@ struct CameraTab: View {
     @State private var lastBandKey: String?
     @State private var showMockControls = false
 
+    /// 未登録の植物を検出したときの名前入力（D9）。
+    /// 専用の登録画面を作らず、登録という作業を出会いという体験に溶かす。
+    @State private var isNaming = false
+    @State private var nameDraft = ""
+    @FocusState private var nameFieldFocused: Bool
+
     /// モックで乾いていく速さ（%/秒）。実センサーが繋がれば使わない。
     ///
     /// 実際の植物は数日かけて乾くが、来場者が数分で変化を体感できる必要がある。
@@ -36,6 +42,8 @@ struct CameraTab: View {
                         .transition(.scale(scale: 0.8).combined(with: .opacity))
                 }
 
+                if isNaming { namingField }
+
                 overlay
             } else {
                 ARUnavailableView(
@@ -44,6 +52,7 @@ struct CameraTab: View {
         }
         .animation(.spring(duration: 0.35), value: scene.bubbleScreenPoint)
         .animation(.spring(duration: 0.35), value: line)
+        .animation(.spring(duration: 0.3), value: isNaming)
         .onAppear { scene.bind(model: model) }
         .onDisappear { scene.stop() }
         .onChange(of: scene.subject) { _, subject in respond(to: subject) }
@@ -56,7 +65,15 @@ struct CameraTab: View {
         switch subject {
         case .none:
             line = ""
+            isNaming = false
         case .plant:
+            // まだ誰も登録していなければ、出会いから始める（D9）
+            if model.store.selectedPlant == nil {
+                line = "はじめまして。名前をつけてくれる？"
+                isNaming = true
+                nameFieldFocused = true
+                return
+            }
             // 検出直後の一言。通信不要で即座に出る（D27）
             line = model.greeting() ?? ""
             // 続けて状態に応じたセリフへ移る
@@ -77,8 +94,27 @@ struct CameraTab: View {
         guard case .plant = scene.subject, let band = model.currentBand() else { return }
         if force || band.key != lastBandKey {
             lastBandKey = band.key
-            if let picked = model.picker.pick(from: band) { line = picked }
+            if let picked = model.picker.pick(from: band) {
+                line = picked
+                recordObservation(dialogue: picked)
+            }
         }
+    }
+
+    /// 観察を記録に残す。マイプラントと日記の素材になる（F-07）
+    private func recordObservation(dialogue: String) {
+        guard let plantId = model.store.selectedPlantId else { return }
+        let stage = model.store.stage(of: plantId) ?? .trueLeaf
+        model.store.record(
+            PlantObservation(
+                observedAt: Date(),
+                plantDetected: true,
+                stage: stage,
+                appearances: [],
+                heightCm: nil,
+                confidence: .medium,
+                dialogue: dialogue),
+            for: plantId)
     }
 
     private func dryIfMocked() {
@@ -169,6 +205,45 @@ struct CameraTab: View {
         .padding()
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 14))
         .padding(.horizontal)
+    }
+
+    /// 名前の入力（D9）。入力するのは名前ひとつだけ。
+    /// 種類はAIが推定し、後からマイプラントで直せる。
+    private var namingField: some View {
+        VStack {
+            Spacer()
+            VStack(spacing: 12) {
+                TextField("名前をつける", text: $nameDraft)
+                    .focused($nameFieldFocused)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.title3)
+                    .submitLabel(.done)
+                    .onSubmit { commitName() }
+
+                Button("はじめる") { commitName() }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(nameDraft.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+            .padding(20)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18))
+            .padding(.horizontal, 32)
+            Spacer().frame(height: 160)
+        }
+        .transition(.move(edge: .bottom).combined(with: .opacity))
+    }
+
+    private func commitName() {
+        let name = nameDraft.trimmingCharacters(in: .whitespaces)
+        guard !name.isEmpty else { return }
+        model.store.register(name: name, species: model.profile.displayName)
+        nameDraft = ""
+        isNaming = false
+        nameFieldFocused = false
+        line = model.greeting() ?? ""
+        Task {
+            try? await Task.sleep(for: .seconds(1.2))
+            refreshLine(force: true)
+        }
     }
 
     /// AR の診断表示。吹き出しが出ないときの切り分けに使う。

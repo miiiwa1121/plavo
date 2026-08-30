@@ -12,9 +12,10 @@ struct MyPageTab: View {
         NavigationStack {
             List {
                 Section("これまで") {
-                    LabeledContent("育てている植物", value: "1株")
-                    LabeledContent("一緒にいる日数", value: "34日")
-                    LabeledContent("見送った植物", value: "0株")
+                    LabeledContent("育てている植物", value: "\(model.store.livingCount)株")
+                    LabeledContent("一緒にいる日数", value: "\(model.store.longestDaysTogether)日")
+                    LabeledContent("見送った植物", value: "\(model.store.witheredCount)株")
+                    LabeledContent("書いた日記", value: "\(model.store.diary.count)件")
                 }
 
                 Section {

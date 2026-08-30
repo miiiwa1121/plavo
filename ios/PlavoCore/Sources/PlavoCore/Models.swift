@@ -121,3 +121,53 @@ public struct Plant: Codable, Sendable, Identifiable, Equatable {
         self.gadgetId = gadgetId
     }
 }
+
+/// 日記の1件（D14 / D26）。
+///
+/// 基本はユーザーが書き、自動生成モードも持つ。
+/// 絵は観察時に撮影した写真を使う。AI生成のイラストは使わない——
+/// 生成された絵は「自分の植物」ではなく、振り返ったときに感情が乗らない。
+public struct DiaryEntry: Codable, Sendable, Identifiable, Equatable {
+    public enum Author: String, Codable, Sendable {
+        /// ユーザー本人が書いた
+        case user
+        /// 観察の記録から自動で綴られた
+        case auto
+    }
+
+    public let id: UUID
+    public let plantId: UUID
+    public let date: Date
+    /// その日の生育段階。見出しに使う
+    public let stage: GrowthStage?
+    /// 何日目か。仕込みの記録では timeline.json の dayLabel を使う
+    public let dayLabel: String?
+    public var text: String
+    /// そのとき植物が言ったこと。引用として添える
+    public var quotedDialogue: String?
+    /// 写真への参照。展示では仕込みの写真か、観察時の撮影画像
+    public var photoRef: String?
+    public let author: Author
+
+    public init(
+        id: UUID = UUID(),
+        plantId: UUID,
+        date: Date,
+        stage: GrowthStage? = nil,
+        dayLabel: String? = nil,
+        text: String,
+        quotedDialogue: String? = nil,
+        photoRef: String? = nil,
+        author: Author
+    ) {
+        self.id = id
+        self.plantId = plantId
+        self.date = date
+        self.stage = stage
+        self.dayLabel = dayLabel
+        self.text = text
+        self.quotedDialogue = quotedDialogue
+        self.photoRef = photoRef
+        self.author = author
+    }
+}

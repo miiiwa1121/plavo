@@ -29,13 +29,23 @@ final class AppModel {
     /// センサー中継サーバーからの取得。繋がらなくてもアプリは成立する
     let sensor = SensorClient()
 
+    /// 植物・観察・日記。展示では永続化しない（D36）
+    let store = PlantStore()
+
+    /// 展示に使う植物のプロファイル。種類が決まったら差し替える（D17-a）
+    let profile: PlantProfile = .default
+
     /// 連続した水やりの検出。過湿の帯域はここでのみ選ばれる
     private(set) var consecutiveWatering = false
     private var lastMoisture: Double = initialSoilMoisture
 
     init() {
         do {
-            bank = try Self.loadBank()
+            let loaded = try Self.loadBank()
+            bank = loaded
+            // すでに育ててきた1株を用意する（L-12）。
+            // 展示では記録が積み上がる時間がないため、あらかじめ仕込む。
+            store.seed(from: loaded, profile: profile)
         } catch {
             loadError = "\(error)"
         }
@@ -105,6 +115,7 @@ final class AppModel {
     /// アプリの構造はタブのままで、リセットは展示運用のための機能として持つ。
     func reset() {
         picker.reset()
+        store.reset()
         soilMoisture = Self.initialSoilMoisture
         lastMoisture = Self.initialSoilMoisture
         consecutiveWatering = false
