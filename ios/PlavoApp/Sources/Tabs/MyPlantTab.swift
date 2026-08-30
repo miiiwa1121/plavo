@@ -163,22 +163,22 @@ struct PlantDetailView: View {
                     HStack {
                         Spacer()
                         ZStack(alignment: .bottomTrailing) {
-                            PlantAvatar(plant: plant, model: model, size: 132)
+                            PlantAvatar(plant: plant, model: model, size: 104)
                             PhotosPicker(selection: $avatarItem, matching: .images) {
                                 Image(systemName: "plus")
-                                    .font(.system(size: 16, weight: .bold))
+                                    .font(.system(size: 14, weight: .bold))
                                     .foregroundStyle(.white)
-                                    .frame(width: 38, height: 38)
+                                    .frame(width: 32, height: 32)
                                     .background(Circle().fill(Color.accentColor))
                                     .overlay(
                                         Circle().stroke(
                                             Color(uiColor: .systemGroupedBackground), lineWidth: 3))
                             }
-                            .offset(x: 4, y: 4)
+                            .offset(x: 2, y: 2)
                         }
                         Spacer()
                     }
-                    .padding(.vertical, 14)
+                    .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
                 }
@@ -259,6 +259,10 @@ struct PlantDetailView: View {
                 }
             }
         }
+        // 節と節の間、そして画面上端の余白を詰める。
+        // 既定のままだとアイコンの上下に大きな空きができる
+        .listSectionSpacing(.compact)
+        .contentMargins(.top, 4, for: .scrollContent)
         .navigationTitle(plant?.name ?? "")
         .navigationBarTitleDisplayMode(.inline)
         .onChange(of: avatarItem) { _, item in
