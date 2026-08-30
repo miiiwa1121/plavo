@@ -14,6 +14,9 @@ struct CameraTab: View {
     @State private var lastBandKey: String?
     @State private var showMockControls = false
 
+    /// 撮影の結果を短く知らせる
+    @State private var captureNotice: String?
+
     /// 未登録の植物を検出したときの名前入力（D9）。
     /// 専用の登録画面を作らず、登録という作業を出会いという体験に溶かす。
     @State private var isNaming = false
@@ -45,6 +48,7 @@ struct CameraTab: View {
                 if isNaming { namingField }
 
                 overlay
+                shutter
             } else {
                 ARUnavailableView(
                     reason: "ARKit はシミュレータで動作しません。実機で確認してください。")
@@ -123,6 +127,60 @@ struct CameraTab: View {
         refreshLine(force: false)
     }
 
+    // MARK: - 撮影
+
+    /// カメラボタン。撮った写真は今日の日記に入る（D26）。
+    ///
+    /// 映像フレームの保存ではなく、ARKit に高解像度の1枚を撮らせている。
+    /// 記録に残る写真の質は、画面で見える映像の質とは別に決まる。
+    private var shutter: some View {
+        VStack {
+            Spacer()
+            HStack {
+                Spacer()
+                Button {
+                    Task { await capture() }
+                } label: {
+                    ZStack {
+                        Circle().fill(.white.opacity(0.25))
+                            .frame(width: 72, height: 72)
+                        Circle().stroke(.white, lineWidth: 3)
+                            .frame(width: 72, height: 72)
+                        Circle().fill(.white).frame(width: 58, height: 58)
+                    }
+                }
+                .disabled(scene.isCapturing)
+                .opacity(scene.isCapturing ? 0.5 : 1)
+                Spacer()
+            }
+            .padding(.bottom, 28)
+        }
+    }
+
+    private func capture() async {
+        guard let plantId = model.store.plantForToday else {
+            captureNotice = "先に植物を登録してください"
+            return
+        }
+        model.store.ensureTodayPage()
+        model.store.attachPlantToToday()
+        _ = plantId
+
+        guard let today = model.store.todayEntry() else { return }
+        guard model.store.canAddPhoto(to: today) else {
+            captureNotice = "今日はもう\(DiaryEntry.maxPhotosPerDay)枚あります"
+            return
+        }
+
+        guard let data = await scene.capturePhoto() else {
+            captureNotice = "撮れませんでした"
+            return
+        }
+        model.store.addPhoto(data, to: today.id)
+        let count = model.store.todayEntry()?.photoRefs.count ?? 0
+        captureNotice = "日記に追加しました（\(count)/\(DiaryEntry.maxPhotosPerDay)）"
+    }
+
     // MARK: - 重ねる表示
 
     @ViewBuilder
@@ -139,7 +197,17 @@ struct CameraTab: View {
 
             Spacer()
 
-            if case .none = scene.subject {
+            if let notice = captureNotice {
+                Text(notice)
+                    .font(.callout)
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 18).padding(.vertical, 10)
+                    .background(.black.opacity(0.55), in: Capsule())
+                    .task {
+                        try? await Task.sleep(for: .seconds(2))
+                        captureNotice = nil
+                    }
+            } else if case .none = scene.subject {
                 // D24 により、見つからない状態をエラーとして扱わない
                 Text("見当たらないなぁ")
                     .font(.callout)
@@ -150,7 +218,8 @@ struct CameraTab: View {
 
             if showMockControls { mockPanel }
         }
-        .padding(.bottom, 24)
+        // シャッターに重ならないよう、少し上に置く
+        .padding(.bottom, 116)
         .contentShape(Rectangle())
         .onLongPressGesture(minimumDuration: 1.5) { showMockControls.toggle() }
     }
@@ -256,6 +325,7 @@ struct CameraTab: View {
     private var diagnostics: some View {
         VStack(alignment: .leading, spacing: 3) {
             row("映像", scene.selectedVideoFormat + (scene.hdrEnabled ? "  HDR" : ""))
+            row("撮影", scene.captureResolution)
             HStack {
                 Text("画質").foregroundStyle(.secondary)
                 Spacer()
@@ -270,7 +340,7 @@ struct CameraTab: View {
                     }
                 }
                 .pickerStyle(.segmented)
-                .frame(width: 130)
+                .frame(width: 170)
             }
             row("トラッキング", scene.trackingDescription)
             row("特徴点", "\(scene.featurePointCount)")

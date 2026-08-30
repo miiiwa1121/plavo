@@ -72,7 +72,10 @@ final class SceneController: NSObject {
 
     /// 選んだ映像形式。画質の確認に使う
     private(set) var selectedVideoFormat = "—"
+    /// 撮影できる静止画の解像度
+    private(set) var captureResolution = "—"
     private(set) var hdrEnabled = false
+    private(set) var isCapturing = false
 
     /// 映像の質。
     ///
@@ -80,14 +83,17 @@ final class SceneController: NSObject {
     /// 追従がカクつくようなら balanced に落とす。実機で見比べられるよう、
     /// 診断パネルから切り替えられる。
     enum VideoQuality: String, CaseIterable {
-        /// 対応する中で最も高い解像度
+        /// 高解像度の静止画を撮れる形式。**記録に残る写真を優先する**
+        case photo
+        /// 対応する中で最も高い映像解像度。プレビューを優先する
         case max
         /// ARKit が既定で選ぶ形式。トラッキングとの釣り合いを取ったもの
         case balanced
 
         var label: String {
             switch self {
-            case .max: "最高"
+            case .photo: "撮影"
+            case .max: "映像"
             case .balanced: "標準"
             }
         }
@@ -123,7 +129,8 @@ final class SceneController: NSObject {
     // MARK: - 起動
 
     override init() {
-        let raw = UserDefaults.standard.string(forKey: "videoQuality") ?? VideoQuality.max.rawValue
+        // 既定は撮影優先。画面で綺麗に見えることより、記録に残る写真の質を取る
+        let raw = UserDefaults.standard.string(forKey: "videoQuality") ?? VideoQuality.photo.rawValue
         videoQuality = VideoQuality(rawValue: raw) ?? .max
         super.init()
     }
@@ -151,10 +158,22 @@ final class SceneController: NSObject {
         // 明示しないと端末のカメラ性能を使い切れない。
         // 対応する中で最も解像度の高い形式を選び、同じ解像度なら
         // フレームレートが高いほうを取る。
-        if videoQuality == .max, let best = Self.bestVideoFormat() {
-            config.videoFormat = best
+        switch videoQuality {
+        case .photo:
+            // 高解像度の静止画を撮れる形式を選ぶ。
+            // **映像の解像度は下がることがあるが、記録に残る写真を優先する。**
+            if let f = ARWorldTrackingConfiguration
+                .recommendedVideoFormatForHighResolutionFrameCapturing
+            {
+                config.videoFormat = f
+            }
+        case .max:
+            if let best = Self.bestVideoFormat() { config.videoFormat = best }
+        case .balanced:
+            break
         }
         selectedVideoFormat = Self.describe(config.videoFormat)
+        captureResolution = Self.captureDescription(config.videoFormat)
 
         // HDR が使える形式なら有効にする。逆光の植物で効く
         if config.videoFormat.isVideoHDRSupported {
@@ -188,6 +207,54 @@ final class SceneController: NSObject {
         let w = Int(format.imageResolution.width)
         let h = Int(format.imageResolution.height)
         return "\(w)x\(h) @\(format.framesPerSecond)fps"
+    }
+
+    /// 高解像度の撮影に対応した形式か。
+    ///
+    /// 実際に撮れる大きさは形式からは分からないため、
+    /// 1枚撮った時点で captureResolution に実測値を入れる。
+    static func captureDescription(_ format: ARConfiguration.VideoFormat) -> String {
+        format.isRecommendedForHighResolutionFrameCapturing ? "高解像度に対応（未撮影）" : "映像と同じ"
+    }
+
+    // MARK: - 撮影
+
+    /// 高解像度の静止画を撮る。
+    ///
+    /// **映像フレームをそのまま保存するのとは別物。**
+    /// ARKit は撮影のためにカメラから改めて高解像度の1枚を取り出す。
+    /// ただしカメラアプリのような計算写真処理（Deep Fusion 等）は入らない。
+    func capturePhoto() async -> Data? {
+        guard let session = arView?.session, !isCapturing else { return nil }
+        isCapturing = true
+        defer { isCapturing = false }
+
+        let orientation = Self.imageOrientation(for: arView?.window?.windowScene)
+
+        let frame: ARFrame? = await withCheckedContinuation { continuation in
+            session.captureHighResolutionFrame { frame, _ in
+                continuation.resume(returning: frame)
+            }
+        }
+        guard let frame else { return nil }
+
+        // 実際に撮れた大きさを記録する。形式からは分からないため
+        let w = CVPixelBufferGetWidth(frame.capturedImage)
+        let h = CVPixelBufferGetHeight(frame.capturedImage)
+        captureResolution = String(
+            format: "%dx%d (%.1fMP)", w, h, Double(w * h) / 1_000_000)
+
+        return Self.jpeg(from: frame.capturedImage, orientation: orientation)
+    }
+
+    /// 撮った画像を、画面の向きに合わせて起こしてから JPEG にする
+    nonisolated private static func jpeg(
+        from buffer: CVPixelBuffer, orientation: CGImagePropertyOrientation
+    ) -> Data? {
+        let image = CIImage(cvPixelBuffer: buffer).oriented(orientation)
+        let context = CIContext()
+        guard let cg = context.createCGImage(image, from: image.extent) else { return nil }
+        return UIImage(cgImage: cg).jpegData(compressionQuality: 0.9)
     }
 
     func stop() {
