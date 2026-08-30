@@ -1,36 +1,27 @@
+import PhotosUI
 import PlavoCore
 import SwiftUI
 
 /// 日記（D14 / D26）。
 ///
+/// **1日1件。**実際の日記帳と同じで、今日のページに書き足していく。
+/// 別画面で書いて保存するのではなく、カードをその場で書き換える。
+///
 /// 一覧は3列の正方形グリッド。タップするとその位置から縦フィードが開き、
 /// 上下にスクロールして前後の日記を続けて読める。
-///
-/// グリッドにしたのは、**記録が積み上がっていることが一目で伝わる**ため。
-/// 縦積みのカードでは1画面に2件しか入らず、3ヶ月分の重みが見えない。
 struct DiaryTab: View {
     @Bindable var model: AppModel
-    @State private var composing = false
 
     var body: some View {
         NavigationStack {
             Group {
-                if model.store.diary.isEmpty {
+                if model.store.diary.isEmpty && model.store.plants.isEmpty {
                     emptyState
                 } else {
                     DiaryGrid(model: model)
                 }
             }
             .navigationTitle("日記")
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button { composing = true } label: {
-                        Image(systemName: "square.and.pencil")
-                    }
-                    .disabled(model.store.plants.isEmpty)
-                }
-            }
-            .sheet(isPresented: $composing) { DiaryComposeView(model: model) }
         }
     }
 
@@ -41,7 +32,7 @@ struct DiaryTab: View {
                 .font(.system(size: 44))
                 .foregroundStyle(.tertiary)
             Text("まだ何も書かれていません").font(.headline)
-            Text("今日のことを残してみませんか")
+            Text("カメラを向けて、出会うところから")
                 .font(.subheadline).foregroundStyle(.secondary)
         }
     }
@@ -49,7 +40,6 @@ struct DiaryTab: View {
 
 // MARK: - グリッド
 
-/// 3列の正方形グリッド。新しい順に並べる。
 private struct DiaryGrid: View {
     @Bindable var model: AppModel
 
@@ -65,7 +55,7 @@ private struct DiaryGrid: View {
             LazyVGrid(columns: columns, spacing: spacing) {
                 ForEach(model.store.diary) { entry in
                     NavigationLink(value: entry.id) {
-                        DiaryTile(entry: entry)
+                        DiaryTile(entry: entry, model: model)
                     }
                     .buttonStyle(.plain)
                 }
@@ -79,47 +69,81 @@ private struct DiaryGrid: View {
 
 /// グリッドの1マス。
 ///
-/// 写真があればそれを、無ければ生育段階の色とシンボルで埋める。
-/// **写真が揃うまでの間に合わせではなく、段階の移り変わりが
-/// グリッド上で見えることに意味がある**——一生の流れが色で伝わる。
+/// 写真があれば1枚目を、無ければ生育段階の色とシンボルで埋める。
+/// **段階の移り変わりがグリッド上で見えることに意味がある**——
+/// 一生の流れが色で伝わる。
 private struct DiaryTile: View {
     let entry: DiaryEntry
+    let model: AppModel
+
+    private var isToday: Bool { Calendar.current.isDateInToday(entry.date) }
 
     var body: some View {
         ZStack {
-            if let ref = entry.photoRef, let image = UIImage(named: ref) {
-                Image(uiImage: image)
-                    .resizable()
-                    .scaledToFill()
+            if let ref = entry.photoRefs.first,
+                let data = model.store.image(ref),
+                let image = UIImage(data: data)
+            {
+                Image(uiImage: image).resizable().scaledToFill()
+            } else if entry.isRest {
+                rest
             } else {
                 fallback
             }
 
-            // 何日目かを左下に置く。写真があっても読めるよう影を敷く
             VStack {
+                // 複数枚あることを右上に示す
+                if entry.photoRefs.count > 1 {
+                    HStack {
+                        Spacer()
+                        Image(systemName: "square.on.square")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.white)
+                            .shadow(radius: 2)
+                    }
+                }
                 Spacer()
                 HStack {
                     if let day = entry.dayLabel {
                         Text(day)
                             .font(.caption2.weight(.semibold))
-                            .foregroundStyle(.white)
-                            .shadow(radius: 2)
+                            // お休みの日は背景が明るいので、白文字では読めない
+                            .foregroundStyle(entry.isRest ? AnyShapeStyle(.tertiary) : AnyShapeStyle(.white))
+                            .shadow(radius: entry.isRest ? 0 : 2)
                     }
                     Spacer()
-                    if entry.author == .user {
-                        // 本人が書いたものを控えめに示す
+                    if !entry.isRest && entry.author == .user {
                         Image(systemName: "pencil")
                             .font(.system(size: 9))
-                            .foregroundStyle(.white)
-                            .shadow(radius: 2)
+                            .foregroundStyle(.white).shadow(radius: 2)
                     }
                 }
-                .padding(6)
             }
+            .padding(6)
         }
         .aspectRatio(1, contentMode: .fill)
         .clipped()
         .contentShape(Rectangle())
+    }
+
+    /// 何も書かなかった日。
+    ///
+    /// **記録しなかった日も残す**（D18-a）。ただし静かに置く——
+    /// 書いた日が引き立つよう、色を持たせない。
+    private var rest: some View {
+        ZStack {
+            Rectangle().fill(Color(uiColor: .secondarySystemBackground))
+            VStack(spacing: 4) {
+                if isToday {
+                    Image(systemName: "square.and.pencil")
+                        .font(.system(size: 18))
+                    Text("今日").font(.caption2)
+                } else {
+                    Text("お休み").font(.caption2)
+                }
+            }
+            .foregroundStyle(.tertiary)
+        }
     }
 
     private var fallback: some View {
@@ -175,85 +199,173 @@ private struct DiaryFeedView: View {
             ScrollView {
                 LazyVStack(spacing: 18) {
                     ForEach(model.store.diary) { entry in
-                        DiaryCard(
-                            entry: entry,
-                            plantName: model.store.plant(entry.plantId)?.name ?? ""
-                        )
-                        .id(entry.id)
+                        DiaryCard(model: model, entryId: entry.id)
+                            .id(entry.id)
                     }
                 }
                 .padding()
             }
             .background(Color(uiColor: .systemGroupedBackground))
-            .onAppear {
-                // タップしたマスの位置から始める
-                proxy.scrollTo(startId, anchor: .top)
-            }
+            .onAppear { proxy.scrollTo(startId, anchor: .top) }
         }
         .navigationTitle("日記")
         .navigationBarTitleDisplayMode(.inline)
     }
 }
 
+/// 1件のカード。その場で書き換えられる。
 private struct DiaryCard: View {
-    let entry: DiaryEntry
-    let plantName: String
+    @Bindable var model: AppModel
+    let entryId: UUID
+
+    @State private var pickerItem: PhotosPickerItem?
+    @State private var page = 0
+    @FocusState private var editing: Bool
+
+    private var entry: DiaryEntry? {
+        model.store.diary.first { $0.id == entryId }
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 8) {
-                Text(entry.dayLabel ?? format(entry.date))
-                    .font(.caption.weight(.semibold))
-                if let stage = entry.stage {
-                    Text(stage.label).font(.caption).foregroundStyle(.secondary)
-                }
-                Spacer()
-                if entry.author == .auto {
-                    Image(systemName: "sparkles")
-                        .font(.caption2).foregroundStyle(.tertiary)
-                }
+        if let entry {
+            VStack(alignment: .leading, spacing: 12) {
+                header(entry)
+                photos(entry)
+                text(entry)
+                quote(entry)
             }
+            .padding(16)
+            .background(.background, in: RoundedRectangle(cornerRadius: 14))
+            .onChange(of: pickerItem) { _, item in load(item) }
+        }
+    }
 
-            photo
+    // MARK: - 見出しと「+」
 
-            if !entry.text.isEmpty {
-                Text(entry.text).font(.callout).lineSpacing(4)
+    private func header(_ entry: DiaryEntry) -> some View {
+        HStack(spacing: 8) {
+            Text(entry.dayLabel ?? format(entry.date))
+                .font(.caption.weight(.semibold))
+            if let stage = entry.stage {
+                Text(stage.label).font(.caption).foregroundStyle(.secondary)
             }
+            Spacer()
 
-            if let quote = entry.quotedDialogue, !quote.isEmpty {
-                HStack(alignment: .top, spacing: 6) {
-                    Rectangle().fill(.tint.opacity(0.4)).frame(width: 3)
-                    Text("\(plantName)「\(quote)」")
-                        .font(.footnote).foregroundStyle(.secondary)
+            if model.store.canAddPhoto(to: entry) {
+                // 写真を足す。上限に達したら消える
+                PhotosPicker(selection: $pickerItem, matching: .images) {
+                    Image(systemName: "plus")
+                        .font(.footnote.weight(.semibold))
+                        .frame(width: 26, height: 26)
+                        .background(.quaternary, in: Circle())
+                }
+            } else {
+                Text("\(DiaryEntry.maxPhotosPerDay)枚まで")
+                    .font(.caption2).foregroundStyle(.tertiary)
+            }
+        }
+    }
+
+    // MARK: - 写真
+
+    /// 左右にスワイプして見る。下に位置を示す点を並べる
+    @ViewBuilder
+    private func photos(_ entry: DiaryEntry) -> some View {
+        if entry.photoRefs.isEmpty {
+            placeholder(entry)
+        } else {
+            VStack(spacing: 8) {
+                TabView(selection: $page) {
+                    ForEach(Array(entry.photoRefs.enumerated()), id: \.element) { index, ref in
+                        if let data = model.store.image(ref),
+                            let image = UIImage(data: data)
+                        {
+                            Image(uiImage: image)
+                                .resizable().scaledToFill()
+                                .frame(maxWidth: .infinity)
+                                .clipped()
+                                .tag(index)
+                        }
+                    }
+                }
+                .tabViewStyle(.page(indexDisplayMode: .never))
+                .frame(height: 240)
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+
+                if entry.photoRefs.count > 1 {
+                    dots(count: entry.photoRefs.count)
                 }
             }
         }
-        .padding(16)
-        .background(.background, in: RoundedRectangle(cornerRadius: 14))
     }
 
-    /// 観察時の撮影画像が入る（D26）。無ければ段階の色で埋める
-    @ViewBuilder
-    private var photo: some View {
-        if let ref = entry.photoRef, let image = UIImage(named: ref) {
-            Image(uiImage: image)
-                .resizable().scaledToFill()
-                .frame(height: 220).clipped()
-                .clipShape(RoundedRectangle(cornerRadius: 10))
-        } else {
-            ZStack {
-                LinearGradient(
-                    colors: [
-                        DiaryTile.tint(entry.stage),
-                        DiaryTile.tint(entry.stage).opacity(0.65),
-                    ],
-                    startPoint: .topLeading, endPoint: .bottomTrailing)
-                Image(systemName: DiaryTile.symbol(entry.stage))
-                    .font(.system(size: 44))
-                    .foregroundStyle(.white.opacity(0.9))
+    /// 「・・・・」。いま何枚目かが分かる
+    private func dots(count: Int) -> some View {
+        HStack(spacing: 6) {
+            ForEach(0..<count, id: \.self) { i in
+                Circle()
+                    .fill(i == page ? Color.primary : Color.secondary.opacity(0.3))
+                    .frame(width: 6, height: 6)
             }
-            .frame(height: 220)
-            .clipShape(RoundedRectangle(cornerRadius: 10))
+        }
+        .animation(.easeInOut(duration: 0.2), value: page)
+    }
+
+    /// 写真が無いときは生育段階の色で埋める
+    private func placeholder(_ entry: DiaryEntry) -> some View {
+        ZStack {
+            LinearGradient(
+                colors: [
+                    DiaryTile.tint(entry.stage), DiaryTile.tint(entry.stage).opacity(0.65),
+                ],
+                startPoint: .topLeading, endPoint: .bottomTrailing)
+            Image(systemName: DiaryTile.symbol(entry.stage))
+                .font(.system(size: 44))
+                .foregroundStyle(.white.opacity(0.9))
+        }
+        .frame(height: 240)
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+    }
+
+    // MARK: - 本文
+
+    /// タップするとその場で書き換えられる。保存の操作は要らない
+    private func text(_ entry: DiaryEntry) -> some View {
+        TextField(
+            "今日のことを書く",
+            text: Binding(
+                get: { model.store.diary.first { $0.id == entryId }?.text ?? "" },
+                set: { model.store.updateText(entryId, to: $0) }
+            ),
+            axis: .vertical
+        )
+        .focused($editing)
+        .font(.callout)
+        .lineSpacing(4)
+        .textFieldStyle(.plain)
+    }
+
+    @ViewBuilder
+    private func quote(_ entry: DiaryEntry) -> some View {
+        if let q = entry.quotedDialogue, !q.isEmpty {
+            HStack(alignment: .top, spacing: 6) {
+                Rectangle().fill(.tint.opacity(0.4)).frame(width: 3)
+                Text("\(model.store.plant(entry.plantId)?.name ?? "")「\(q)」")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    // MARK: - 写真の読み込み
+
+    private func load(_ item: PhotosPickerItem?) {
+        guard let item else { return }
+        Task {
+            guard let data = try? await item.loadTransferable(type: Data.self) else { return }
+            await MainActor.run {
+                model.store.addPhoto(data, to: entryId)
+                pickerItem = nil
+            }
         }
     }
 
@@ -262,77 +374,5 @@ private struct DiaryCard: View {
         f.locale = Locale(identifier: "ja_JP")
         f.dateFormat = "M月d日"
         return f.string(from: date)
-    }
-}
-
-// MARK: - 執筆
-
-/// 日記を書く（D14）。展示ではセッション中のみ保持し、リセットで消える（D36）。
-struct DiaryComposeView: View {
-    @Bindable var model: AppModel
-    @Environment(\.dismiss) private var dismiss
-
-    @State private var text = ""
-    @State private var plantId: UUID?
-
-    var body: some View {
-        NavigationStack {
-            Form {
-                Section("だれのこと") {
-                    Picker("植物", selection: $plantId) {
-                        ForEach(model.store.plants) { plant in
-                            Text(plant.name).tag(Optional(plant.id))
-                        }
-                    }
-                }
-
-                Section("写真") {
-                    RoundedRectangle(cornerRadius: 10)
-                        .fill(.quaternary)
-                        .frame(height: 120)
-                        .overlay {
-                            VStack(spacing: 4) {
-                                Image(systemName: "photo.badge.plus").font(.title2)
-                                Text("観察の記録から選ぶ").font(.caption)
-                            }
-                            .foregroundStyle(.secondary)
-                        }
-                }
-
-                Section("今日のこと") {
-                    TextEditor(text: $text).frame(minHeight: 140)
-                }
-            }
-            .navigationTitle("日記を書く")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("やめる") { dismiss() }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("保存") { save() }
-                        .disabled(
-                            plantId == nil
-                                || text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                }
-            }
-            .onAppear {
-                plantId = model.store.selectedPlantId ?? model.store.plants.first?.id
-            }
-        }
-    }
-
-    private func save() {
-        guard let plantId else { return }
-        model.store.addDiary(
-            DiaryEntry(
-                plantId: plantId,
-                date: Date(),
-                stage: model.store.stage(of: plantId),
-                dayLabel: nil,
-                text: text.trimmingCharacters(in: .whitespacesAndNewlines),
-                quotedDialogue: model.store.observations(of: plantId).last?.dialogue,
-                author: .user))
-        dismiss()
     }
 }

@@ -19,6 +19,10 @@ final class PlantStore {
     private(set) var observations: [UUID: [PlantObservation]] = [:]
     private(set) var diary: [DiaryEntry] = []
 
+    /// 写真の実体。参照名から引く。
+    /// D36 により永続化しないため、メモリに置く。リセットで消える。
+    private(set) var images: [String: Data] = [:]
+
     /// 仕込みの株。展示中ずっと残る。
     ///
     /// 位置づけは「開発者が3ヶ月育てた記録」。来場者はこれを見てから、
@@ -39,10 +43,19 @@ final class PlantStore {
     /// これがマイプラントと日記の中身になり、時系列パネルとも一致する。
     func seed(from bank: DialogueBank, profile: PlantProfile) {
         guard seededPlantId == nil else { return }
+        seedSource = bank
+        seedProfile = profile
 
-        // パネルの最終日から逆算して、出会った日を決める
+        // パネルの最終日から逆算して、出会った日を決める。
+        //
+        // 没日は「昨日」に寄せる。日記は1日1ページで自動的に増えるため、
+        // 没後の日数だけお休みのページが並ぶ。間を空けすぎると、
+        // グリッドの先頭がお休みで埋まってしまう。
         let lastDay = bank.timeline.compactMap { Self.day(from: $0.dayLabel) }.max() ?? 0
-        let plantedAt = Calendar.current.date(byAdding: .day, value: -lastDay, to: Date()) ?? Date()
+        let sinceDeath = 1
+        let plantedAt =
+            Calendar.current.date(byAdding: .day, value: -(lastDay + sinceDeath), to: Date())
+            ?? Date()
 
         let plant = Plant(
             name: "ひまり",
@@ -57,36 +70,56 @@ final class PlantStore {
         // 仕込みの株はマイプラントと日記で「これまでの記録」として見せ、
         // 来場者は自分で1株を登録するところから始める。
 
+        // 観察は、パネルのある日にだけ記録する
         var obs: [PlantObservation] = []
+        var byDay: [Int: DialogueBank.Panel] = [:]
         for panel in bank.timeline {
-            guard let day = Self.day(from: panel.dayLabel),
-                let date = Calendar.current.date(byAdding: .day, value: day, to: plantedAt)
+            guard let day = Self.day(from: panel.dayLabel) else { continue }
+            byDay[day] = panel
+            guard let date = Calendar.current.date(byAdding: .day, value: day, to: plantedAt)
             else { continue }
-            let stage = GrowthStage(rawValue: Self.stageKey(from: panel.key)) ?? .trueLeaf
-            let line = panel.lines.first ?? ""
-
             obs.append(
                 PlantObservation(
                     observedAt: date,
                     plantDetected: true,
-                    stage: stage,
+                    stage: GrowthStage(rawValue: Self.stageKey(from: panel.key)) ?? .trueLeaf,
                     appearances: [],
                     heightCm: nil,
                     confidence: .high,
-                    dialogue: line))
-
-            diary.append(
-                DiaryEntry(
-                    plantId: plant.id,
-                    date: date,
-                    stage: stage,
-                    dayLabel: panel.dayLabel,
-                    text: Self.seededText(for: panel),
-                    quotedDialogue: line,
-                    author: .auto))
+                    dialogue: panel.lines.first ?? ""))
         }
         observations[plant.id] = obs.sorted { $0.observedAt < $1.observedAt }
         seededObservationCount = obs.count
+
+        // **日記は1日1ページ。書かなかった日もページを作る。**
+        // 記録しなかった日を無かったことにはしない（D18-a）。
+        var reachedStage: GrowthStage = .seed
+        for day in 1...lastDay {
+            guard let date = Calendar.current.date(byAdding: .day, value: day, to: plantedAt)
+            else { continue }
+            if let panel = byDay[day] {
+                reachedStage = GrowthStage(rawValue: Self.stageKey(from: panel.key)) ?? reachedStage
+                diary.append(
+                    DiaryEntry(
+                        plantId: plant.id,
+                        date: date,
+                        stage: reachedStage,
+                        dayLabel: "\(day)日目",
+                        text: Self.seededText(for: panel),
+                        quotedDialogue: panel.lines.first,
+                        author: .auto))
+            } else {
+                // お休みした日
+                diary.append(
+                    DiaryEntry(
+                        plantId: plant.id,
+                        date: date,
+                        stage: reachedStage,
+                        dayLabel: "\(day)日目",
+                        text: "",
+                        author: .user))
+            }
+        }
         diary.sort { $0.date > $1.date }
     }
 
@@ -165,7 +198,92 @@ final class PlantStore {
     }
 
     func removeDiary(_ id: UUID) {
+        if let entry = diary.first(where: { $0.id == id }) {
+            for ref in entry.photoRefs { images[ref] = nil }
+        }
         diary.removeAll { $0.id == id }
+    }
+
+    // MARK: - 今日の日記（1日1件）
+
+    /// 日記は全体で一つ、1日1ページ。同じ日に2ページは作らない
+    func todayEntry() -> DiaryEntry? {
+        diary.first { Calendar.current.isDateInToday($0.date) }
+    }
+
+    /// **今日のページを自動で用意する。**
+    ///
+    /// 日が変われば勝手に増える。ユーザーが「作る」操作をしなくてよい。
+    /// 起動時と、画面が前面に戻ったときに呼ぶ。
+    func ensureTodayPage() {
+        guard todayEntry() == nil else { return }
+        let plantId = plantForToday
+        let entry = DiaryEntry(
+            plantId: plantId,
+            date: Date(),
+            stage: plantId.flatMap { stage(of: $0) },
+            dayLabel: plantId.flatMap { dayLabel(for: $0) },
+            text: "",
+            quotedDialogue: plantId.flatMap { observations(of: $0).last?.dialogue },
+            author: .user)
+        addDiary(entry)
+    }
+
+    /// その日の主役になる株。枯れた株は選ばない
+    var plantForToday: UUID? {
+        if let selected = selectedPlantId, stage(of: selected) != .withered {
+            return selected
+        }
+        return plants.first { stage(of: $0.id) != .withered }?.id
+    }
+
+    /// 出会ってから何日目か
+    private func dayLabel(for plantId: UUID) -> String? {
+        guard let plant = plant(plantId) else { return nil }
+        return "\(daysTogether(plant) + 1)日目"
+    }
+
+    // MARK: - 編集
+
+    /// 本文を書き換える。その場で即座に反映する
+    func updateText(_ id: UUID, to text: String) {
+        guard let i = diary.firstIndex(where: { $0.id == id }) else { return }
+        diary[i].text = text
+    }
+
+    /// 写真を足す。上限に達していれば false を返す
+    @discardableResult
+    func addPhoto(_ data: Data, to id: UUID) -> Bool {
+        guard let i = diary.firstIndex(where: { $0.id == id }) else { return false }
+        guard diary[i].photoRefs.count < DiaryEntry.maxPhotosPerDay else { return false }
+        let ref = UUID().uuidString
+        images[ref] = data
+        diary[i].photoRefs.append(ref)
+        return true
+    }
+
+    func removePhoto(_ ref: String, from id: UUID) {
+        guard let i = diary.firstIndex(where: { $0.id == id }) else { return }
+        diary[i].photoRefs.removeAll { $0 == ref }
+        images[ref] = nil
+    }
+
+    func image(_ ref: String) -> Data? { images[ref] }
+
+    /// 今日のページに株を結びつける。登録より先にページができているため、
+    /// あとから主役が決まることがある
+    func attachPlantToToday() {
+        guard let i = diary.firstIndex(where: { Calendar.current.isDateInToday($0.date) }),
+            diary[i].plantId == nil,
+            let plantId = plantForToday
+        else { return }
+        diary[i].plantId = plantId
+        diary[i].stage = stage(of: plantId)
+        diary[i].dayLabel = dayLabel(for: plantId)
+    }
+
+    func canAddPhoto(to entry: DiaryEntry) -> Bool {
+        entry.photoRefs.count < DiaryEntry.maxPhotosPerDay
     }
 
     // MARK: - 取り出し
@@ -215,23 +333,25 @@ final class PlantStore {
 
     /// 次の来場者のために、この回の追加を消す。
     /// 仕込みの株は残す。毎回同じ状態から始まる再現性のため。
+    /// 次の来場者のために、この回の追加を消す。
+    ///
+    /// **仕込みも含めて作り直す。**来場者が仕込みの日記を書き換えている
+    /// 可能性があるため、差分を取り除くだけでは元に戻らない。
     func reset() {
-        guard let seeded = seededPlantId else {
-            plants.removeAll()
-            observations.removeAll()
-            diary.removeAll()
-            return
-        }
-        plants.removeAll { $0.id != seeded }
-        observations = observations.filter { $0.key == seeded }
-        diary.removeAll { $0.plantId != seeded }
-        // 仕込みの株に、この回の観察が積まれていたら取り除く
-        if var obs = observations[seeded], obs.count > seededObservationCount {
-            obs.removeLast(obs.count - seededObservationCount)
-            observations[seeded] = obs
-        }
-        diary.removeAll { $0.plantId == seeded && $0.author == .user }
+        plants.removeAll()
+        observations.removeAll()
+        diary.removeAll()
+        images.removeAll()
+        seededPlantId = nil
+        seededObservationCount = 0
         // 未選択に戻す。次の来場者も「はじめまして」から始まる
         selectedPlantId = nil
+        if let bank = seedSource {
+            seed(from: bank, profile: seedProfile ?? .default)
+        }
     }
+
+    /// 作り直すために、仕込みの元を覚えておく
+    private var seedSource: DialogueBank?
+    private var seedProfile: PlantProfile?
 }

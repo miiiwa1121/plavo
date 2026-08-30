@@ -9,6 +9,7 @@ import SwiftUI
 /// アプリの構造とは関係しない。
 struct RootView: View {
     @State private var model = AppModel()
+    @Environment(\.scenePhase) private var scenePhase
     @State private var selection: Int = Self.initialTab
 
     /// 起動引数でタブを指定できる。動作確認と、展示中に説明員が
@@ -43,5 +44,11 @@ struct RootView: View {
         // 展示で説明員が毎回タップするのは現実的でない。
         // 繋がらなくてもモックで動くため、失敗しても体験は止まらない（F-10）。
         .task { model.startSensor() }
+        // 日が変われば日記のページが自動で増える。
+        // 起動時と、前面に戻ったときに確かめる。
+        .onAppear { model.store.ensureTodayPage() }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { model.store.ensureTodayPage() }
+        }
     }
 }

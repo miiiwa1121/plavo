@@ -46,6 +46,17 @@ final class AppModel {
             // すでに育ててきた1株を用意する（L-12）。
             // 展示では記録が積み上がる時間がないため、あらかじめ仕込む。
             store.seed(from: loaded, profile: profile)
+
+            // 起動引数で株を登録できる。
+            //   例: -registerPlant そら
+            // 動作確認に使うほか、**当日ARが動かなかったときの保険**でもある。
+            // 登録手段がカメラだけだと、AR が失敗した時点で日記もマイプラントも
+            // 手が出せなくなる。
+            if let name = UserDefaults.standard.string(forKey: "registerPlant"),
+                !name.isEmpty
+            {
+                store.register(name: name, species: profile.displayName)
+            }
         } catch {
             loadError = "\(error)"
         }

@@ -122,12 +122,22 @@ public struct Plant: Codable, Sendable, Identifiable, Equatable {
     }
 }
 
-/// 日記の1件（D14 / D26）。
+/// 日記の1ページ（D14 / D26）。
 ///
-/// 基本はユーザーが書き、自動生成モードも持つ。
+/// **1日1ページ。日が変われば自動で増える。**投稿ではなく日誌であり、
+/// 書かなかった日も「お休みした日」としてページが残る。
+/// D18-a で時間の積み重ねを価値の中心に置いた以上、記録しなかった日を
+/// 無かったことにはしない。
+///
+/// 日記は植物ごとではなく**全体で一つ**。植物ごとの記録はマイプラントで見る。
+///
 /// 絵は観察時に撮影した写真を使う。AI生成のイラストは使わない——
 /// 生成された絵は「自分の植物」ではなく、振り返ったときに感情が乗らない。
 public struct DiaryEntry: Codable, Sendable, Identifiable, Equatable {
+
+    /// 1日に追加できる写真の上限。
+    /// 多すぎると1日が冗長になり、少なすぎると記録しきれない。
+    public static let maxPhotosPerDay = 5
     public enum Author: String, Codable, Sendable {
         /// ユーザー本人が書いた
         case user
@@ -136,28 +146,36 @@ public struct DiaryEntry: Codable, Sendable, Identifiable, Equatable {
     }
 
     public let id: UUID
-    public let plantId: UUID
+    /// その日の主役になった株。何も書かなかった日は nil のこともある
+    public var plantId: UUID?
     public let date: Date
     /// その日の生育段階。見出しに使う
-    public let stage: GrowthStage?
+    public var stage: GrowthStage?
     /// 何日目か。仕込みの記録では timeline.json の dayLabel を使う
-    public let dayLabel: String?
+    public var dayLabel: String?
     public var text: String
     /// そのとき植物が言ったこと。引用として添える
     public var quotedDialogue: String?
-    /// 写真への参照。展示では仕込みの写真か、観察時の撮影画像
-    public var photoRef: String?
+    /// 写真への参照。1日に複数枚を持てる（上限は DiaryEntry.maxPhotosPerDay）。
+    /// 実体は PlantStore が持つ。ここでは識別子だけを扱い、
+    /// ドメインのモデルに画像データを持ち込まない。
+    public var photoRefs: [String]
     public let author: Author
+
+    /// 何も書かれず、写真も無い日。「お休み」として表示する
+    public var isRest: Bool {
+        text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && photoRefs.isEmpty
+    }
 
     public init(
         id: UUID = UUID(),
-        plantId: UUID,
+        plantId: UUID? = nil,
         date: Date,
         stage: GrowthStage? = nil,
         dayLabel: String? = nil,
         text: String,
         quotedDialogue: String? = nil,
-        photoRef: String? = nil,
+        photoRefs: [String] = [],
         author: Author
     ) {
         self.id = id
@@ -167,7 +185,7 @@ public struct DiaryEntry: Codable, Sendable, Identifiable, Equatable {
         self.dayLabel = dayLabel
         self.text = text
         self.quotedDialogue = quotedDialogue
-        self.photoRef = photoRef
+        self.photoRefs = photoRefs
         self.author = author
     }
 }
