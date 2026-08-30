@@ -11,14 +11,18 @@ import SwiftUI
 /// 上下にスクロールして前後の日記を続けて読める。
 struct DiaryTab: View {
     @Bindable var model: AppModel
+    /// タイルのタップを自前で扱うため、遷移を明示的に持つ。
+    /// NavigationLink のままだと、シングルタップとダブルタップを
+    /// 区別できない（お休みのまとまりを畳むのにダブルタップを使う）。
+    @State private var path = NavigationPath()
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             Group {
                 if model.store.diary.isEmpty && model.store.plants.isEmpty {
                     emptyState
                 } else {
-                    DiaryGrid(model: model)
+                    DiaryGrid(model: model, path: $path)
                 }
             }
             .navigationTitle("日記")
@@ -42,6 +46,7 @@ struct DiaryTab: View {
 
 private struct DiaryGrid: View {
     @Bindable var model: AppModel
+    @Binding var path: NavigationPath
 
     /// マスの間隔。詰めるほど「量」が伝わる
     private let spacing: CGFloat = 2
@@ -58,19 +63,18 @@ private struct DiaryGrid: View {
             LazyVGrid(columns: columns, spacing: spacing) {
                 ForEach(units) { unit in
                     switch unit {
-                    case .entry(let entry):
-                        NavigationLink(value: entry.id) {
-                            DiaryTile(entry: entry, model: model)
-                        }
-                        .buttonStyle(.plain)
+                    case .entry(let entry, let runId):
+                        DiaryTile(entry: entry, model: model)
+                            // 展開したお休みは、ダブルタップで畳む。
+                            // count: 2 を先に置かないと、シングルが先に取られる
+                            .onTapGesture(count: 2) {
+                                if let runId { expanded.remove(runId) }
+                            }
+                            .onTapGesture { path.append(entry.id) }
 
                     case .restRun(let id, let entries):
-                        Button {
-                            expanded.insert(id)
-                        } label: {
-                            RestRunTile(entries: entries)
-                        }
-                        .buttonStyle(.plain)
+                        RestRunTile(entries: entries)
+                            .onTapGesture { expanded.insert(id) }
                     }
                 }
             }
@@ -94,9 +98,10 @@ private struct DiaryGrid: View {
             guard !run.isEmpty else { return }
             // 1日だけなら、まとめずにそのまま出す
             if run.count == 1 {
-                result.append(.entry(run[0]))
+                result.append(.entry(run[0], runId: nil))
             } else if let first = run.first, expanded.contains(first.id) {
-                result.append(contentsOf: run.map { .entry($0) })
+                // 展開中。畳めるように、どのまとまりに属するかを持たせる
+                result.append(contentsOf: run.map { .entry($0, runId: first.id) })
             } else if let first = run.first {
                 result.append(.restRun(id: first.id, entries: run))
             }
@@ -109,7 +114,7 @@ private struct DiaryGrid: View {
                 run.append(entry)
             } else {
                 flush()
-                result.append(.entry(entry))
+                result.append(.entry(entry, runId: nil))
             }
         }
         flush()
@@ -118,12 +123,14 @@ private struct DiaryGrid: View {
 }
 
 private enum GridUnit: Identifiable {
-    case entry(DiaryEntry)
+    /// runId は、展開中のお休みのまとまりに属する場合だけ入る。
+    /// ダブルタップで畳むときに、どのまとまりを閉じるかを知るために持つ。
+    case entry(DiaryEntry, runId: UUID?)
     case restRun(id: UUID, entries: [DiaryEntry])
 
     var id: UUID {
         switch self {
-        case .entry(let e): e.id
+        case .entry(let e, _): e.id
         case .restRun(let id, _): id
         }
     }
@@ -140,16 +147,17 @@ private struct RestRunTile: View {
     }
 
     var body: some View {
-        ZStack {
-            Rectangle().fill(Color(uiColor: .secondarySystemBackground))
-            VStack(spacing: 5) {
-                Text("お休み").font(.caption2)
-                Text("\(entries.count)日").font(.caption.weight(.semibold))
+        Color.clear
+            .aspectRatio(1, contentMode: .fit)
+            .overlay { Rectangle().fill(Color(uiColor: .secondarySystemBackground)) }
+            .overlay {
+                VStack(spacing: 5) {
+                    Text("お休み").font(.caption2)
+                    Text("\(entries.count)日").font(.caption.weight(.semibold))
+                }
+                .foregroundStyle(.tertiary)
             }
-            .foregroundStyle(.tertiary)
-
-            VStack {
-                Spacer()
+            .overlay(alignment: .bottom) {
                 HStack {
                     Text(range)
                         .font(.system(size: 9, weight: .semibold))
@@ -161,10 +169,8 @@ private struct RestRunTile: View {
                 }
                 .padding(6)
             }
-        }
-        .aspectRatio(1, contentMode: .fill)
-        .clipped()
-        .contentShape(Rectangle())
+            .clipped()
+            .contentShape(Rectangle())
     }
 }
 
@@ -180,54 +186,65 @@ private struct DiaryTile: View {
     private var isToday: Bool { Calendar.current.isDateInToday(entry.date) }
 
     var body: some View {
-        ZStack {
-            if let ref = entry.photoRefs.first,
-                let data = model.store.image(ref),
-                let image = UIImage(data: data)
-            {
-                Image(uiImage: image).resizable().scaledToFill()
-            } else if entry.isRest {
-                rest
-            } else {
-                fallback
-            }
+        // **先に正方形を確定させ、そこへ画像を流し込む。**
+        // 画像側に大きさを決めさせると、縦長・横長の写真で枠が押し広げられ、
+        // グリッドの行が崩れる。
+        Color.clear
+            .aspectRatio(1, contentMode: .fit)
+            .overlay { background }
+            .overlay(alignment: .bottom) { labels }
+            .clipped()
+            .contentShape(Rectangle())
+    }
 
-            VStack {
-                // 複数枚あることを右上に示す
-                if entry.photoRefs.count > 1 {
-                    HStack {
-                        Spacer()
-                        Image(systemName: "square.on.square")
-                            .font(.system(size: 11))
-                            .foregroundStyle(.white)
-                            .shadow(radius: 2)
-                    }
-                }
-                Spacer()
+    @ViewBuilder
+    private var background: some View {
+        if let ref = entry.photoRefs.first,
+            let data = model.store.image(ref),
+            let image = UIImage(data: data)
+        {
+            Image(uiImage: image)
+                .resizable()
+                .scaledToFill()
+        } else if entry.isRest {
+            rest
+        } else {
+            fallback
+        }
+    }
+
+    private var labels: some View {
+        VStack(spacing: 0) {
+            // 複数枚あることを右上に示す
+            if entry.photoRefs.count > 1 {
                 HStack {
-                    // 日記は全体で一つなので、株ごとの「N日目」ではなく日付を出す。
-                    // 複数の株が混ざったとき、「1日目」の隣に「78日目」が並ぶと
-                    // 何の日数なのか分からなくなる。
-                    Text(Self.shortDate(entry.date))
-                        .font(.caption2.weight(.semibold))
-                        // お休みの日は背景が明るいので、白文字では読めない
-                        .foregroundStyle(
-                            entry.isRest ? AnyShapeStyle(.tertiary) : AnyShapeStyle(.white)
-                        )
-                        .shadow(radius: entry.isRest ? 0 : 2)
                     Spacer()
-                    if !entry.isRest && entry.author == .user {
-                        Image(systemName: "pencil")
-                            .font(.system(size: 9))
-                            .foregroundStyle(.white).shadow(radius: 2)
-                    }
+                    Image(systemName: "square.on.square")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.white).shadow(radius: 2)
                 }
             }
-            .padding(6)
+            Spacer(minLength: 0)
+            HStack {
+                // 日記は全体で一つなので、株ごとの「N日目」ではなく日付を出す。
+                // 複数の株が混ざったとき、「1日目」の隣に「78日目」が並ぶと
+                // 何の日数なのか分からなくなる。
+                Text(Self.shortDate(entry.date))
+                    .font(.caption2.weight(.semibold))
+                    // お休みの日は背景が明るいので、白文字では読めない
+                    .foregroundStyle(
+                        entry.isRest ? AnyShapeStyle(.tertiary) : AnyShapeStyle(.white)
+                    )
+                    .shadow(radius: entry.isRest ? 0 : 2)
+                Spacer()
+                if !entry.isRest && entry.author == .user {
+                    Image(systemName: "pencil")
+                        .font(.system(size: 9))
+                        .foregroundStyle(.white).shadow(radius: 2)
+                }
+            }
         }
-        .aspectRatio(1, contentMode: .fill)
-        .clipped()
-        .contentShape(Rectangle())
+        .padding(6)
     }
 
     /// 何も書かなかった日。
@@ -396,9 +413,12 @@ private struct DiaryCard: View {
                         if let data = model.store.image(ref),
                             let image = UIImage(data: data)
                         {
-                            Image(uiImage: image)
-                                .resizable().scaledToFill()
-                                .frame(maxWidth: .infinity)
+                            // 枠を先に決めてから流し込む。写真の縦横比で
+                            // カードの高さが変わらないようにする
+                            Color.clear
+                                .overlay {
+                                    Image(uiImage: image).resizable().scaledToFill()
+                                }
                                 .clipped()
                                 .tag(index)
                         }

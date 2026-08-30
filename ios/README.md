@@ -73,6 +73,23 @@ open PlavoApp.xcodeproj
 
 `xcodegen` は Homebrew で入る（`brew install xcodegen`）。
 
+### ビルドが古いまま動くことがある
+
+**このプロジェクトでは増分ビルドが変更を取りこぼす。**ソースを直したのに挙動が変わらないときは、まずこれを疑う。3回起きている。
+
+```bash
+# ソースとバイナリの時刻を比べる
+stat -f '%Sm %N' -t '%H:%M:%S' Sources/**/*.swift
+stat -f '%Sm %N' -t '%H:%M:%S' <DerivedData>/.../PlavoApp.app/PlavoApp
+```
+
+**挙動が仕様と合わないときは `clean build` を挟む。**
+
+```bash
+xcodebuild -project PlavoApp.xcodeproj -scheme PlavoApp \
+  -sdk iphonesimulator -destination 'platform=iOS Simulator,name=iPhone 17' clean build
+```
+
 ### 動作確認
 
 ```bash
