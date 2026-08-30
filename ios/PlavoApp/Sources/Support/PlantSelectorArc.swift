@@ -19,10 +19,10 @@ struct PlantSelectorArc: View {
 
     /// 押し始めてから開くまでの間。
     /// 触れた瞬間に開くと長押しの感じがなく、意図せず開いてしまう
-    private let pressBeforeOpen: Duration = .milliseconds(320)
+    private let pressBeforeOpen: Duration = .milliseconds(250)
     /// 開いたあと、触られなければ自動で閉じるまでの時間。
     /// 長く残ると映像の邪魔になる
-    private let idleBeforeCollapse: Duration = .seconds(0.7)
+    private let idleBeforeCollapse: Duration = .seconds(0.4)
 
     /// 縦の置き場所。画面中央からのずれ。持ち方に合わせて動かせる
     /// 未設定なら 0。`object(forKey:) as? Double` は型が合わず取りこぼす
@@ -43,27 +43,36 @@ struct PlantSelectorArc: View {
     /// これ以上動いたら「移動」とみなす
     private let moveThreshold: CGFloat = 10
 
-    // 閉じているとき
-    private let closedRadius: CGFloat = 20
-    private let closedWidth: CGFloat = 40
-    // 開いたとき
-    private let openRadius: CGFloat = 92
-    private let openWidth: CGFloat = 54
-    private let maxSpread: Double = 108
+    // 閉じているとき。中心が画面の端にあるので、半円がそのまま見える
+    private let closedRadius: CGFloat = 40
+    private let closedCenterX: CGFloat = 0
+
+    // 開いたとき。
+    // **中心を画面の外へ出し、大きな円の浅い一部だけを見せる。**
+    // iPhone のカメラのズームと同じ作り。円を丸ごと描き、
+    // 画面の縁が切り取ることで、縁から生えた弧になる。
+    /// 半径と中心の差が、画面に出っ張る量になる（400-310 なら 90pt）。
+    /// 半径を大きくすると弧は緩やかになるが、縦にも広がって映像を覆う。
+    /// 出っ張りを保ったまま縦を抑えるには、半径ごと詰める。
+    private let openRadius: CGFloat = 300
+    /// 中心の横位置。負の値だけ画面の外に出る
+    private let openCenterX: CGFloat = -210
+    private let maxSpread: Double = 40
 
     private var plants: [Plant] { model.store.plants }
 
     /// 実際に使う広がり。
     /// 株が少ないときまで上限いっぱいに広げると、名前が弧の両端に張り付く
     private var spread: Double {
-        min(maxSpread, 44 * Double(max(1, plants.count - 1)))
+        min(maxSpread, 17 * Double(max(1, plants.count - 1)))
     }
 
     private var radius: CGFloat { expanded ? openRadius : closedRadius }
-    private var width: CGFloat { expanded ? openWidth : closedWidth }
-    private var halfAngle: Double { expanded ? spread / 2 + 6 : 90 }
-    /// 名前を並べる弧の半径
-    private var nameRadius: CGFloat { expanded ? openRadius : closedRadius * 0.9 }
+    private var centerX: CGFloat { expanded ? openCenterX : closedCenterX }
+    /// 名前を並べる弧の半径。塗りの縁より少し内側に置く
+    private var nameRadius: CGFloat { expanded ? openRadius - 28 : closedRadius * 0.5 }
+    /// 弧のいちばん出っ張るところの横位置
+    private var apexX: CGFloat { radius + centerX }
 
     var body: some View {
         GeometryReader { geo in
@@ -76,10 +85,12 @@ struct PlantSelectorArc: View {
                 // 帯は自分の枠の中央を弧の中心にする。
                 // 名前は centerY（＝画面中央＋ずらし）を基準に置くので、
                 // **帯にも同じずらしを掛けないと、動かしたときに離れる。**
-                ArcBand(radius: radius, halfAngle: halfAngle, width: width)
+                // **円を丸ごと描き、画面の縁で切る。**
+                // 帯にすると縁から浮いてしまい、貼り付いて見えない。
+                ArcSegment(radius: radius, centerX: centerX)
                     .fill(.ultraThinMaterial)
                     .shadow(color: .black.opacity(0.22), radius: 8)
-                    .frame(width: openRadius + openWidth / 2, height: geo.size.height)
+                    .frame(width: openRadius + openCenterX + 12, height: geo.size.height)
                     .offset(y: barOffset)
 
                 ForEach(Array(plants.enumerated()), id: \.element.id) { index, plant in
@@ -116,7 +127,8 @@ struct PlantSelectorArc: View {
         let selected = plant.id == model.store.selectedPlantId
         return Text(plant.name)
             .font(selected ? .subheadline.weight(.bold) : .caption)
-            .foregroundStyle(selected ? .white : .white.opacity(0.45))
+            // 選択中は黄色。iPhone のズームで現在値が黄色になるのに倣う
+            .foregroundStyle(selected ? AnyShapeStyle(.yellow) : AnyShapeStyle(.white.opacity(0.5)))
             .lineLimit(1)
             .fixedSize()
     }
@@ -128,7 +140,9 @@ struct PlantSelectorArc: View {
             return CGPoint(x: nameRadius, y: centerY)
         }
         let a = angle(for: index, of: plants.count) * .pi / 180
-        return CGPoint(x: nameRadius * cos(a), y: centerY + nameRadius * sin(a))
+        return CGPoint(
+            x: centerX + nameRadius * cos(a),
+            y: centerY + nameRadius * sin(a))
     }
 
     private func opacity(for plant: Plant) -> Double {
@@ -141,9 +155,12 @@ struct PlantSelectorArc: View {
     // MARK: - 触れる範囲とジェスチャ
 
     private var hitSize: CGSize {
-        expanded
-            ? CGSize(width: openRadius + openWidth / 2, height: (openRadius + openWidth) * 2)
-            : CGSize(width: closedWidth + 12, height: closedWidth * 2)
+        guard expanded else {
+            return CGSize(width: closedRadius + 12, height: closedRadius * 2)
+        }
+        // 名前が広がる縦幅に、掴みやすいだけの余裕を足す
+        let vertical = 2 * nameRadius * sin(spread / 2 * .pi / 180) + 120
+        return CGSize(width: openRadius + openCenterX + 24, height: vertical)
     }
 
     /// 押す・滑らせる・動かすを1つのジェスチャで扱う。
@@ -197,8 +214,14 @@ struct PlantSelectorArc: View {
             }
     }
 
+    /// 画面からはみ出さない範囲に収める。
+    ///
+    /// 見える弧の縦の広がりは、円の半径と中心の位置から決まる。
+    /// 半径そのものではない——大半が画面の外にあるため。
     private func clamp(_ value: CGFloat, height: CGFloat) -> CGFloat {
-        let limit = max(0, height / 2 - openRadius - openWidth - 24)
+        let visibleHalfHeight = sqrt(
+            max(0, openRadius * openRadius - openCenterX * openCenterX))
+        let limit = max(0, height / 2 - visibleHalfHeight - 24)
         return min(limit, max(-limit, value))
     }
 
@@ -209,7 +232,8 @@ struct PlantSelectorArc: View {
     private func select(at point: CGPoint) {
         guard !plants.isEmpty else { return }
         let centerY = hitSize.height / 2
-        let a = atan2(point.y - centerY, max(1, point.x)) * 180 / .pi
+        // 弧の中心は画面の外（centerX は負）。そこからの角度で決まる
+        let a = atan2(point.y - centerY, max(1, point.x - centerX)) * 180 / .pi
         var best = 0
         var bestDiff = Double.greatestFiniteMagnitude
         for i in plants.indices {
@@ -244,41 +268,30 @@ struct PlantSelectorArc: View {
     }
 }
 
-/// 左端に貼り付く帯。半径・広がり・太さを動かすと、半円から弧へ連続して変わる。
+/// 画面の縁で切り取られる円。
 ///
-/// 閉じているとき（半径20・太さ40・±90°）は内側の半径が0になり、
-/// 塗りつぶしの半円に見える。開くと内側が空いて帯になる。
-private struct ArcBand: Shape {
+/// 中心の横位置を負にすると、円の大半が画面の外へ出て、
+/// 縁から生えた浅い弧になる。閉じているときは中心が縁の上にあるので、
+/// そのまま半円として見える。
+///
+/// **帯（ドーナツ）にはしない。**縁から浮いてしまい、貼り付いて見えない。
+private struct ArcSegment: Shape {
     var radius: CGFloat
-    var halfAngle: Double
-    var width: CGFloat
+    /// 円の中心の横位置。負の値だけ画面の外に出る
+    var centerX: CGFloat
 
-    var animatableData: AnimatablePair<CGFloat, AnimatablePair<Double, CGFloat>> {
-        get { .init(radius, .init(halfAngle, width)) }
+    var animatableData: AnimatablePair<CGFloat, CGFloat> {
+        get { .init(radius, centerX) }
         set {
             radius = newValue.first
-            halfAngle = newValue.second.first
-            width = newValue.second.second
+            centerX = newValue.second
         }
     }
 
     func path(in rect: CGRect) -> Path {
-        let center = CGPoint(x: 0, y: rect.midY)
-        let outer = radius + width / 2
-        let inner = max(0, radius - width / 2)
-
-        var p = Path()
-        p.addArc(
-            center: center, radius: outer,
-            startAngle: .degrees(-halfAngle), endAngle: .degrees(halfAngle), clockwise: false)
-        if inner > 0 {
-            p.addArc(
-                center: center, radius: inner,
-                startAngle: .degrees(halfAngle), endAngle: .degrees(-halfAngle), clockwise: true)
-        } else {
-            p.addLine(to: center)
-        }
-        p.closeSubpath()
-        return p
+        Path(
+            ellipseIn: CGRect(
+                x: centerX - radius, y: rect.midY - radius,
+                width: radius * 2, height: radius * 2))
     }
 }
