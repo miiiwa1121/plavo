@@ -361,6 +361,7 @@ struct CameraTab: View {
                 .frame(width: 170)
             }
             row("セッション", scene.isRunning ? "稼働中" : "停止中")
+            row("周囲の明るさ", String(format: "%.2f", scene.ambientBrightness))
             row("トラッキング", scene.trackingDescription)
             row("特徴点", "\(scene.featurePointCount)")
             row(

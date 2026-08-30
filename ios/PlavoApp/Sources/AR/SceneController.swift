@@ -70,6 +70,14 @@ final class SceneController: NSObject {
     /// 現在の検出間隔（実測に応じて伸びる）
     var currentDetectionInterval: TimeInterval { detectionInterval }
 
+    /// 周囲の明るさ 0（暗い）〜1（明るい）。
+    ///
+    /// **弧の色を背景に合わせるために使う。**
+    /// ぼかし（UIVisualEffectView）は ARKit が Metal で描く映像を取り込めず、
+    /// 背景が変わっても色が動かなかった。ARKit が毎フレーム渡してくる
+    /// 明るさの推定値を使い、自前で色を決める。
+    private(set) var ambientBrightness: Double = 0.3
+
     /// 選んだ映像形式。画質の確認に使う
     private(set) var selectedVideoFormat = "—"
     /// 撮影できる静止画の解像度
@@ -543,6 +551,13 @@ extension SceneController: ARSessionDelegate {
     /// 診断情報を更新する。吹き出しが出ないときの切り分けに使う
     private func updateDiagnostics(_ frame: ARFrame) {
         featurePointCount = frame.rawFeaturePoints?.points.count ?? 0
+
+        if let light = frame.lightEstimate {
+            // ambientIntensity は概ね 0〜2000 ルーメン。1000 が中庸。
+            // そのまま使うと照明のちらつきで色が揺れるので、なめらかに追う
+            let target = min(1, max(0, light.ambientIntensity / 1800))
+            ambientBrightness += (target - ambientBrightness) * 0.08
+        }
         switch frame.camera.trackingState {
         case .normal:
             trackingDescription = "正常"

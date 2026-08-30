@@ -13,6 +13,8 @@ struct PlantSelectorArc: View {
     @Bindable var model: AppModel
     /// ガジェットが株を決めたときに変わる。合図として受け取る
     let autoSelectedAt: Date?
+    /// 周囲の明るさ 0〜1。弧の色をこれで決める
+    var ambientBrightness: Double = 0.3
 
     @State private var expanded = false
     @State private var collapseTask: Task<Void, Never>?
@@ -71,6 +73,11 @@ struct PlantSelectorArc: View {
         min(maxSpread, 24 * Double(max(1, plants.count - 1)))
     }
 
+    /// 背景の明るさに合わせた塗り。濃さは 0.82 で固定する
+    private var fillColor: Color {
+        Color(white: 0.06 + ambientBrightness * 0.86).opacity(0.82)
+    }
+
     private var radius: CGFloat { expanded ? openRadius : closedRadius }
     private var centerX: CGFloat { expanded ? openCenterX : closedCenterX }
     /// 名前を並べる弧の半径。塗りの縁より少し内側に置く
@@ -91,22 +98,18 @@ struct PlantSelectorArc: View {
                 // **帯にも同じずらしを掛けないと、動かしたときに離れる。**
                 // **円を丸ごと描き、画面の縁で切る。**
                 // 帯にすると縁から浮いてしまい、貼り付いて見えない。
-                // **タブバーと同じものを直接使う。**
+                // **明るさを実測して色を決める。**
                 //
-                // SwiftUI の `.ultraThinMaterial` は、ARKit が Metal で描く
-                // カメラ映像を取り込めず、背景が変わっても色が動かなかった。
-                // タブバーの実体である UIVisualEffectView を使うと、
-                // 同じ経路で背後を拾う。
+                // ぼかし（UIVisualEffectView / SwiftUI の Material）は、
+                // ARKit が Metal で描くカメラ映像を取り込めない。素材を
+                // 置いても地の色が出るだけで、背景が変わっても動かなかった。
                 //
-                // 濃さを足で調整しない。素のまま置いて、タブバーと
-                // 同じ見え方になるかを先に確かめる。
-                // タブバーやナビゲーションバーが使っているのはこれ。
-                // 暗いところでは黒く沈み、明るいところでは持ち上がる
-                MaterialBlur(style: .systemChromeMaterial)
-                    .mask { ArcSegment(radius: radius, centerX: centerX) }
+                // ARKit が毎フレーム渡してくる明るさの推定値を使い、
+                // 暗い場面では沈み、明るい場面では持ち上がる色を作る。
+                ArcSegment(radius: radius, centerX: centerX)
+                    .fill(fillColor)
                     .frame(width: openRadius + openCenterX + 12, height: geo.size.height)
                     .offset(y: barOffset)
-                    .allowsHitTesting(false)
 
                 ForEach(Array(plants.enumerated()), id: \.element.id) { index, plant in
                     nameLabel(plant)
@@ -282,30 +285,6 @@ struct PlantSelectorArc: View {
             guard !Task.isCancelled else { return }
             expanded = false
         }
-    }
-}
-
-/// タブバーが使っているぼかしそのもの。
-///
-/// SwiftUI の `.ultraThinMaterial` は、ARKit が Metal で描くカメラ映像を
-/// 取り込めない。UIKit のぼかしを直接置くと、同じ経路で背後を拾う。
-///
-/// 濃さは `alpha` で指定する。SwiftUI の `.opacity()` を使うと別レイヤー
-/// として合成され、背後の取り込みが切れて色が動かなくなる。
-private struct MaterialBlur: UIViewRepresentable {
-    var style: UIBlurEffect.Style = .systemUltraThinMaterial
-    var alpha: CGFloat = 1
-
-    func makeUIView(context: Context) -> UIVisualEffectView {
-        let view = UIVisualEffectView(effect: UIBlurEffect(style: style))
-        view.alpha = alpha
-        view.isUserInteractionEnabled = false
-        return view
-    }
-
-    func updateUIView(_ view: UIVisualEffectView, context: Context) {
-        view.effect = UIBlurEffect(style: style)
-        view.alpha = alpha
     }
 }
 
