@@ -46,6 +46,9 @@ private struct DiaryGrid: View {
     /// マスの間隔。詰めるほど「量」が伝わる
     private let spacing: CGFloat = 2
 
+    /// 展開したお休みのまとまり
+    @State private var expanded: Set<UUID> = []
+
     private var columns: [GridItem] {
         Array(repeating: GridItem(.flexible(), spacing: spacing), count: 3)
     }
@@ -53,17 +56,115 @@ private struct DiaryGrid: View {
     var body: some View {
         ScrollView {
             LazyVGrid(columns: columns, spacing: spacing) {
-                ForEach(model.store.diary) { entry in
-                    NavigationLink(value: entry.id) {
-                        DiaryTile(entry: entry, model: model)
+                ForEach(units) { unit in
+                    switch unit {
+                    case .entry(let entry):
+                        NavigationLink(value: entry.id) {
+                            DiaryTile(entry: entry, model: model)
+                        }
+                        .buttonStyle(.plain)
+
+                    case .restRun(let id, let entries):
+                        Button {
+                            expanded.insert(id)
+                        } label: {
+                            RestRunTile(entries: entries)
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
                 }
             }
         }
+        .animation(.easeInOut(duration: 0.2), value: expanded)
         .navigationDestination(for: UUID.self) { id in
             DiaryFeedView(model: model, startId: id)
         }
+    }
+
+    /// グリッドに並べる単位。
+    ///
+    /// **お休みが2日以上続いたら1枚にまとめる。**
+    /// 書かなかった日も残すという方針（D18-a）は保ちつつ、
+    /// 空白がグリッドを埋め尽くさないようにする。タップすると展開する。
+    private var units: [GridUnit] {
+        var result: [GridUnit] = []
+        var run: [DiaryEntry] = []
+
+        func flush() {
+            guard !run.isEmpty else { return }
+            // 1日だけなら、まとめずにそのまま出す
+            if run.count == 1 {
+                result.append(.entry(run[0]))
+            } else if let first = run.first, expanded.contains(first.id) {
+                result.append(contentsOf: run.map { .entry($0) })
+            } else if let first = run.first {
+                result.append(.restRun(id: first.id, entries: run))
+            }
+            run.removeAll()
+        }
+
+        for entry in model.store.diary {
+            // 今日は、まだ書いていなくてもまとめない。書く場所が要る
+            if entry.isRest && !Calendar.current.isDateInToday(entry.date) {
+                run.append(entry)
+            } else {
+                flush()
+                result.append(.entry(entry))
+            }
+        }
+        flush()
+        return result
+    }
+}
+
+private enum GridUnit: Identifiable {
+    case entry(DiaryEntry)
+    case restRun(id: UUID, entries: [DiaryEntry])
+
+    var id: UUID {
+        switch self {
+        case .entry(let e): e.id
+        case .restRun(let id, _): id
+        }
+    }
+}
+
+/// 連続したお休みをまとめたマス。タップすると展開する。
+private struct RestRunTile: View {
+    let entries: [DiaryEntry]
+
+    /// グリッドは新しい順に並ぶので、範囲は古い日から新しい日へ書く
+    private var range: String {
+        guard let newest = entries.first, let oldest = entries.last else { return "" }
+        return "\(DiaryTile.shortDate(oldest.date))〜\(DiaryTile.shortDate(newest.date))"
+    }
+
+    var body: some View {
+        ZStack {
+            Rectangle().fill(Color(uiColor: .secondarySystemBackground))
+            VStack(spacing: 5) {
+                Text("お休み").font(.caption2)
+                Text("\(entries.count)日").font(.caption.weight(.semibold))
+            }
+            .foregroundStyle(.tertiary)
+
+            VStack {
+                Spacer()
+                HStack {
+                    Text(range)
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(.tertiary)
+                    Spacer()
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 8))
+                        .foregroundStyle(.tertiary)
+                }
+                .padding(6)
+            }
+        }
+        .aspectRatio(1, contentMode: .fill)
+        .clipped()
+        .contentShape(Rectangle())
     }
 }
 
