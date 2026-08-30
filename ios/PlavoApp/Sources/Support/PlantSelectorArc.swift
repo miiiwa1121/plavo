@@ -20,8 +20,31 @@ struct PlantSelectorArc: View {
     @State private var expanded = false
     @State private var collapseTask: Task<Void, Never>?
 
-    /// 開いたあと、触られなければ自動で閉じるまでの時間
-    private let idleBeforeCollapse: Duration = .seconds(2.5)
+    /// 押し始めてから開くまでの間。
+    /// 触れた瞬間に開くと長押しの感じがなく、意図せず開いてしまう
+    private let pressBeforeOpen: Duration = .milliseconds(320)
+    /// 開いたあと、触られなければ自動で閉じるまでの時間。
+    /// 長く残ると映像の邪魔になる
+    private let idleBeforeCollapse: Duration = .seconds(1.1)
+
+    /// 縦の置き場所。画面中央からのずれ。持ち方に合わせて動かせる
+    @State private var barOffset: CGFloat = UserDefaults.standard
+        .object(forKey: "arcOffset") as? Double ?? 0
+    @State private var dragBaseOffset: CGFloat = 0
+    @State private var pressTask: Task<Void, Never>?
+    @State private var mode: Mode = .idle
+
+    /// 触れたあと、指の動きで何をするかが決まる
+    private enum Mode {
+        case idle
+        /// すぐ動かした → バーの置き場所を変える
+        case moving
+        /// 押さえたまま → 株を選ぶ
+        case selecting
+    }
+
+    /// これ以上動いたら「移動」とみなす
+    private let moveThreshold: CGFloat = 10
 
     private let collapsedRadius: CGFloat = 40
     private let expandedRadius: CGFloat = 130
@@ -42,7 +65,7 @@ struct PlantSelectorArc: View {
 
     var body: some View {
         GeometryReader { geo in
-            let centerY = geo.size.height / 2
+            let centerY = geo.size.height / 2 + barOffset
 
             ZStack(alignment: .topLeading) {
                 if expanded {
@@ -59,7 +82,7 @@ struct PlantSelectorArc: View {
                     .frame(width: hit.width, height: hit.height)
                     .contentShape(Rectangle())
                     .offset(y: centerY - hit.height / 2)
-                    .gesture(arcGesture(centerY: centerY))
+                    .gesture(arcGesture(height: geo.size.height))
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
@@ -153,24 +176,69 @@ struct PlantSelectorArc: View {
             : CGSize(width: collapsedRadius + 12, height: collapsedRadius * 2)
     }
 
-    /// 押す・長押し・滑らせるを1つのジェスチャで扱う。
+    /// 押す・滑らせる・動かすを1つのジェスチャで扱う。
     ///
     /// `onTapGesture` と `onLongPressGesture` を併せて付けると、タップ側が
-    /// 先に触れを掴んで長押しが成立しない。触れた時点で開き、
-    /// そのまま滑らせれば選べる形にする。
-    private func arcGesture(centerY: CGFloat) -> some Gesture {
+    /// 先に触れを掴んで長押しが成立しない。指の動きで振り分ける。
+    ///
+    /// | 指の動き | 何が起きるか |
+    /// |---|---|
+    /// | すぐ上下に動かす | バーの置き場所を変える |
+    /// | 押さえたまま待つ | 弧が開き、そのまま滑らせて株を選ぶ |
+    private func arcGesture(height: CGFloat) -> some Gesture {
         DragGesture(minimumDistance: 0)
             .onChanged { v in
                 collapseTask?.cancel()
-                if !expanded {
-                    expanded = true
-                    return
+
+                switch mode {
+                case .idle:
+                    if expanded {
+                        // すでに開いているなら、そのまま選ぶ
+                        mode = .selecting
+                        select(at: v.location, centerY: expandedRadius)
+                        return
+                    }
+                    if abs(v.translation.height) > moveThreshold {
+                        // 先に動いた。置き場所を変える
+                        pressTask?.cancel()
+                        pressTask = nil
+                        mode = .moving
+                        dragBaseOffset = barOffset
+                    } else if pressTask == nil {
+                        // 押さえている。少し待ってから開く
+                        pressTask = Task {
+                            try? await Task.sleep(for: pressBeforeOpen)
+                            guard !Task.isCancelled else { return }
+                            mode = .selecting
+                            expanded = true
+                        }
+                    }
+
+                case .moving:
+                    barOffset = clamp(dragBaseOffset + v.translation.height, height: height)
+
+                case .selecting:
+                    // 触れる範囲の原点は (0, centerY - expandedRadius)。
+                    // 弧の中心はその原点から見て (0, expandedRadius) にある
+                    select(at: v.location, centerY: expandedRadius)
                 }
-                // 触れる範囲の原点は (0, centerY - expandedRadius)。
-                // 弧の中心はその原点から見て (0, expandedRadius) にある
-                select(at: v.location, centerY: expandedRadius)
             }
-            .onEnded { _ in scheduleCollapse() }
+            .onEnded { _ in
+                pressTask?.cancel()
+                pressTask = nil
+                if mode == .moving {
+                    UserDefaults.standard.set(Double(barOffset), forKey: "arcOffset")
+                } else if expanded {
+                    scheduleCollapse()
+                }
+                mode = .idle
+            }
+    }
+
+    /// 画面からはみ出さない範囲に収める
+    private func clamp(_ value: CGFloat, height: CGFloat) -> CGFloat {
+        let limit = max(0, height / 2 - expandedRadius - 24)
+        return min(limit, max(-limit, value))
     }
 
     // MARK: - 選択
