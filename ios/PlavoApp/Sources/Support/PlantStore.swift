@@ -215,6 +215,36 @@ final class PlantStore {
         plants[i].avatarRef = nil
     }
 
+    // MARK: - ガジェットとの紐づけ（D39）
+
+    /// そのガジェットが見ている株
+    func plant(forGadget gadgetId: String) -> Plant? {
+        plants.first { $0.gadgetId == gadgetId }
+    }
+
+    func linkGadget(_ gadgetId: String, to plantId: UUID) {
+        // 同じガジェットが二株に付かないようにする
+        for i in plants.indices where plants[i].gadgetId == gadgetId {
+            plants[i].gadgetId = nil
+        }
+        guard let i = plants.firstIndex(where: { $0.id == plantId }) else { return }
+        plants[i].gadgetId = gadgetId
+    }
+
+    /// センサーから値が届いたときに、どの株かを決める。
+    ///
+    /// 紐づいていなければ、生きている株が1つだけのときに限って自動で結ぶ。
+    /// 展示は1株1ガジェットなので、これで手間なく繋がる。
+    /// 複数あるときは勝手に決めない——間違えると記録が混ざる。
+    @discardableResult
+    func resolvePlant(forGadget gadgetId: String) -> UUID? {
+        if let linked = plant(forGadget: gadgetId) { return linked.id }
+        let living = plants.filter { stage(of: $0.id) != .withered }
+        guard living.count == 1, let only = living.first else { return nil }
+        linkGadget(gadgetId, to: only.id)
+        return only.id
+    }
+
     func updateSpecies(_ plantId: UUID, to species: String) {
         guard let i = plants.firstIndex(where: { $0.id == plantId }) else { return }
         plants[i].species = species

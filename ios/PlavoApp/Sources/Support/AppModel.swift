@@ -63,9 +63,23 @@ final class AppModel {
     }
 
     /// センサーの取得を始める。値が来たら実センサー扱いに切り替わる
+    /// ガジェットによって株が自動で選ばれたことを知らせる。
+    /// UIはこれを見て、弧を一度開いて「切り替わった」ことを示す（D39）
+    private(set) var autoSelectedAt: Date?
+
     func startSensor() {
         sensor.start { [weak self] payload in
-            self?.updateMoisture(payload.soilMoisture.percent, fromRealSensor: true)
+            guard let self else { return }
+            self.updateMoisture(payload.soilMoisture.percent, fromRealSensor: true)
+
+            // どの株を見ているかをガジェットから決める（D39）。
+            // 黙って切り替えず、UIに知らせて一度見せる
+            if let resolved = self.store.resolvePlant(forGadget: payload.gadgetId),
+                resolved != self.store.selectedPlantId
+            {
+                self.store.selectedPlantId = resolved
+                self.autoSelectedAt = Date()
+            }
         }
     }
 

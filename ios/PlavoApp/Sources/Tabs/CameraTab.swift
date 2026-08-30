@@ -54,6 +54,10 @@ struct CameraTab: View {
                 ARUnavailableView(
                     reason: "ARKit はシミュレータで動作しません。実機で確認してください。")
             }
+
+            // どの株を見ているか（D39）。
+            // ARの可否とは無関係なので、分岐の外に置く
+            PlantSelectorArc(model: model, autoSelectedAt: model.autoSelectedAt)
         }
         .animation(.spring(duration: 0.35), value: scene.bubbleScreenPoint)
         .animation(.spring(duration: 0.35), value: line)
