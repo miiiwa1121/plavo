@@ -151,11 +151,72 @@ struct PlantDetailView: View {
     @State private var avatarItem: PhotosPickerItem?
     /// 選んだ写真。切り抜き画面に渡す
     @State private var cropTarget: PickedImage?
+    /// 情報とギャラリーの行き来。スライドでも切り替わる
+    @State private var page = 0
     @Environment(\.dismiss) private var dismiss
 
     private var plant: Plant? { model.store.plant(plantId) }
 
     var body: some View {
+        VStack(spacing: 0) {
+            Picker("", selection: $page) {
+                Text("情報").tag(0)
+                Text("ギャラリー").tag(1)
+            }
+            .pickerStyle(.segmented)
+            .padding(.horizontal)
+            .padding(.bottom, 8)
+
+            TabView(selection: $page) {
+                info.tag(0)
+                gallery.tag(1)
+            }
+            .tabViewStyle(.page(indexDisplayMode: .never))
+        }
+        .background(Color(uiColor: .systemGroupedBackground))
+        .navigationTitle(plant?.name ?? "")
+        .navigationBarTitleDisplayMode(.inline)
+        .onChange(of: avatarItem) { _, item in
+            guard let item else { return }
+            Task {
+                guard let data = try? await item.loadTransferable(type: Data.self),
+                    let image = UIImage(data: data)
+                else { return }
+                await MainActor.run {
+                    // そのまま丸く切ると狙った場所が入らない。範囲を選ばせる
+                    cropTarget = PickedImage(image: image)
+                    avatarItem = nil
+                }
+            }
+        }
+        .sheet(item: $cropTarget) { picked in
+            AvatarCropView(image: picked.image) { data in
+                model.store.setAvatar(data, for: plantId)
+            }
+        }
+        .confirmationDialog(
+            "本当に削除しますか", isPresented: $showRemoveConfirm, titleVisibility: .visible
+        ) {
+            Button("削除する", role: .destructive) {
+                model.store.remove(plantId)
+                dismiss()
+            }
+            Button("やめる", role: .cancel) {}
+        } message: {
+            // D29。何が失われるかを明示する。
+            // 一覧からスワイプで静かに消えるのは、植物を人と同等に扱う軸と矛盾する。
+            if let plant {
+                Text(
+                    "この子との記録がすべて消えます。\n"
+                        + "一緒に過ごした\(model.store.daysTogether(plant))日分の日記も戻せません。")
+            }
+        }
+    }
+
+    // MARK: - 情報
+
+    @ViewBuilder
+    private var info: some View {
         List {
             if let plant {
                 // トップはアイコンだけ。操作は右下の「+」に寄せる
@@ -221,7 +282,8 @@ struct PlantDetailView: View {
                         HStack {
                             Image(
                                 systemName: reached(stage) ? "checkmark.circle.fill" : "circle")
-                                .foregroundStyle(reached(stage) ? AnyShapeStyle(.green) : AnyShapeStyle(.tertiary))
+                                .foregroundStyle(
+                                    reached(stage) ? AnyShapeStyle(.green) : AnyShapeStyle(.tertiary))
                             Text(stage.label)
                                 .foregroundStyle(reached(stage) ? .primary : .secondary)
                         }
@@ -266,41 +328,44 @@ struct PlantDetailView: View {
         // 既定のままだとアイコンの上下に大きな空きができる
         .listSectionSpacing(.compact)
         .contentMargins(.top, 4, for: .scrollContent)
-        .navigationTitle(plant?.name ?? "")
-        .navigationBarTitleDisplayMode(.inline)
-        .onChange(of: avatarItem) { _, item in
-            guard let item else { return }
-            Task {
-                guard let data = try? await item.loadTransferable(type: Data.self),
-                    let image = UIImage(data: data)
-                else { return }
-                await MainActor.run {
-                    // そのまま丸く切ると狙った場所が入らない。範囲を選ばせる
-                    cropTarget = PickedImage(image: image)
-                    avatarItem = nil
+    }
+
+    // MARK: - ギャラリー
+
+    /// その株の写真だけを集めて並べる。
+    ///
+    /// 日記が「その日に何があったか」なのに対し、ここは「この子がどう育ったか」。
+    /// 目的が違うので、日記を植物で絞り込んだものにはしない（§4.4）。
+    @ViewBuilder
+    private var gallery: some View {
+        let photos = model.store.photos(of: plantId)
+        if photos.isEmpty {
+            // 「写真がありません」とは書かない（原則3）
+            VStack(spacing: 12) {
+                Image(systemName: "photo.on.rectangle.angled")
+                    .font(.system(size: 44))
+                    .foregroundStyle(.tertiary)
+                Text("まだ写真がありません").font(.headline)
+                Text("カメラから撮ると、ここに集まります")
+                    .font(.subheadline).foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            ScrollView {
+                LazyVGrid(
+                    columns: Array(repeating: GridItem(.flexible(), spacing: 2), count: 3),
+                    spacing: 2
+                ) {
+                    ForEach(photos, id: \.ref) { photo in
+                        NavigationLink(value: photo.ref) {
+                            GalleryTile(ref: photo.ref, date: photo.date, model: model)
+                        }
+                        .buttonStyle(.plain)
+                    }
                 }
             }
-        }
-        .sheet(item: $cropTarget) { picked in
-            AvatarCropView(image: picked.image) { data in
-                model.store.setAvatar(data, for: plantId)
-            }
-        }
-        .confirmationDialog(
-            "本当に削除しますか", isPresented: $showRemoveConfirm, titleVisibility: .visible
-        ) {
-            Button("削除する", role: .destructive) {
-                model.store.remove(plantId)
-                dismiss()
-            }
-            Button("やめる", role: .cancel) {}
-        } message: {
-            // D29。何が失われるかを明示する。
-            // 一覧からスワイプで静かに消えるのは、植物を人と同等に扱う軸と矛盾する。
-            if let plant {
-                Text(
-                    "この子との記録がすべて消えます。\n"
-                        + "一緒に過ごした\(model.store.daysTogether(plant))日分の日記も戻せません。")
+            .navigationDestination(for: String.self) { ref in
+                PhotoViewer(refs: photos.map(\.ref), startRef: ref, model: model)
             }
         }
     }
@@ -318,5 +383,55 @@ struct PlantDetailView: View {
         f.locale = Locale(identifier: "ja_JP")
         f.dateFormat = "M月d日"
         return f.string(from: date)
+    }
+}
+
+
+/// ギャラリーの1マス
+private struct GalleryTile: View {
+    let ref: String
+    let date: Date
+    let model: AppModel
+
+    var body: some View {
+        Color.clear
+            .aspectRatio(1, contentMode: .fit)
+            .overlay {
+                if let data = model.store.image(ref), let image = UIImage(data: data) {
+                    Image(uiImage: image).resizable().scaledToFill()
+                } else {
+                    Rectangle().fill(.quaternary)
+                }
+            }
+            .clipped()
+            .contentShape(Rectangle())
+    }
+}
+
+/// 写真を大きく見る。左右にスライドして前後へ
+private struct PhotoViewer: View {
+    let refs: [String]
+    let startRef: String
+    let model: AppModel
+
+    @State private var current: String = ""
+
+    var body: some View {
+        TabView(selection: $current) {
+            ForEach(refs, id: \.self) { ref in
+                Group {
+                    if let data = model.store.image(ref), let image = UIImage(data: data) {
+                        Image(uiImage: image).resizable().scaledToFit()
+                    } else {
+                        Color.black
+                    }
+                }
+                .tag(ref)
+            }
+        }
+        .tabViewStyle(.page)
+        .background(Color.black.ignoresSafeArea())
+        .navigationBarTitleDisplayMode(.inline)
+        .onAppear { current = startRef }
     }
 }

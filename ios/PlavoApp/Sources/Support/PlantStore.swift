@@ -320,6 +320,17 @@ final class PlantStore {
 
     func image(_ ref: String) -> Data? { images[ref] }
 
+    /// その株の写真を、新しい順に集める。
+    ///
+    /// 日記は全体で一つだが、**写真は撮った対象が決まっている。**
+    /// 株ごとの振り返りは、日記を絞り込むのではなく写真を集めて見せる（§4.4）。
+    /// 日記は「その日に何があったか」、ギャラリーは「この子がどう育ったか」。
+    func photos(of plantId: UUID) -> [(ref: String, date: Date)] {
+        diary
+            .filter { $0.plantId == plantId }
+            .flatMap { entry in entry.photoRefs.map { (ref: $0, date: entry.date) } }
+    }
+
     /// 今日のページに株を結びつける。登録より先にページができているため、
     /// あとから主役が決まることがある
     func attachPlantToToday() {
