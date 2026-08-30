@@ -93,7 +93,10 @@ struct PlantSelectorArc: View {
                 // 帯にすると縁から浮いてしまい、貼り付いて見えない。
                 ArcSegment(radius: radius, centerX: centerX)
                     .fill(.ultraThinMaterial)
-                    .shadow(color: .black.opacity(0.22), radius: 8)
+                    // 「見当たらないなぁ」と同じくらいまで薄くする。
+                    // 素材のままだと映像の上で板のように見える
+                    .opacity(0.55)
+                    .shadow(color: .black.opacity(0.15), radius: 6)
                     .frame(width: openRadius + openCenterX + 12, height: geo.size.height)
                     .offset(y: barOffset)
 
@@ -125,18 +128,26 @@ struct PlantSelectorArc: View {
 
     // MARK: - 名前
 
-    /// 枠は敷かない。**色の濃さだけで選択を示す。**
-    /// 枠があると弧の上でうるさく、映像も余計に隠れる
+    /// 枠は敷かない。**色だけで選択を示す。**
+    /// 枠があると弧の上でうるさく、映像も余計に隠れる。
+    ///
+    /// 色は `.primary` / `.secondary` / アクセントで組む。
+    /// **タブバーと同じ方式**なので、明暗モードに合わせて自動で変わる。
+    /// 白で固定すると、明るい配色のときに読めなくなる。
     private func nameLabel(_ plant: Plant) -> some View {
         let selected = plant.id == model.store.selectedPlantId
         return Text(plant.name)
             .font(selected ? .subheadline.weight(.bold) : .caption)
-            // 選択中はタブバーと同じ色。アプリの中で「いま選ばれているもの」の
-            // 示し方を1つに揃える
-            .foregroundStyle(
-                selected ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.white.opacity(0.5)))
+            .foregroundStyle(nameColor(selected: selected))
             .lineLimit(1)
             .fixedSize()
+    }
+
+    /// 閉じているときは選択中の1つしか出ないので、色で区別する意味がない。
+    /// そこは中立の色に置き、開いたときだけアクセントで差をつける
+    private func nameColor(selected: Bool) -> AnyShapeStyle {
+        guard expanded else { return AnyShapeStyle(.primary) }
+        return selected ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.secondary)
     }
 
     /// 閉じているときは半円の中に重ね、開くと弧に沿って散る。
