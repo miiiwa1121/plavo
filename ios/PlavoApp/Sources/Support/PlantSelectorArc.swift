@@ -50,6 +50,16 @@ struct PlantSelectorArc: View {
                 } else {
                     collapsedDisc(centerY: centerY)
                 }
+
+                // **触る場所は状態をまたいで1つに保つ。**
+                // 開いた瞬間にビューが入れ替わると、その上のジェスチャが切れて
+                // 「押したまま滑らせて選ぶ」が途切れる。
+                let hit = hitSize
+                Color.clear
+                    .frame(width: hit.width, height: hit.height)
+                    .contentShape(Rectangle())
+                    .offset(y: centerY - hit.height / 2)
+                    .gesture(arcGesture(centerY: centerY))
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
@@ -81,9 +91,7 @@ struct PlantSelectorArc: View {
             }
             .shadow(color: .black.opacity(0.25), radius: 6)
             .offset(y: centerY - h / 2)
-            .contentShape(Rectangle())
-            .onTapGesture { open() }
-            .onLongPressGesture(minimumDuration: 0.25) { open() }
+            .allowsHitTesting(false)
             .transition(.scale(scale: 0.6, anchor: .leading).combined(with: .opacity))
     }
 
@@ -117,15 +125,7 @@ struct PlantSelectorArc: View {
         }
         .frame(width: expandedRadius, height: size)
         .offset(y: centerY - expandedRadius)
-        .contentShape(Rectangle())
-        .gesture(
-            DragGesture(minimumDistance: 0)
-                .onChanged { v in
-                    collapseTask?.cancel()
-                    select(at: v.location, centerY: expandedRadius)
-                }
-                .onEnded { _ in scheduleCollapse() }
-        )
+        .allowsHitTesting(false)
         .transition(.scale(scale: 0.6, anchor: .leading).combined(with: .opacity))
     }
 
@@ -142,6 +142,35 @@ struct PlantSelectorArc: View {
                     Capsule().fill(.white.opacity(0.22))
                 }
             }
+    }
+
+    // MARK: - 触れる範囲とジェスチャ
+
+    /// 触れる範囲。開いているときは弧全体、閉じているときは半円のぶん
+    private var hitSize: CGSize {
+        expanded
+            ? CGSize(width: expandedRadius, height: expandedRadius * 2)
+            : CGSize(width: collapsedRadius + 12, height: collapsedRadius * 2)
+    }
+
+    /// 押す・長押し・滑らせるを1つのジェスチャで扱う。
+    ///
+    /// `onTapGesture` と `onLongPressGesture` を併せて付けると、タップ側が
+    /// 先に触れを掴んで長押しが成立しない。触れた時点で開き、
+    /// そのまま滑らせれば選べる形にする。
+    private func arcGesture(centerY: CGFloat) -> some Gesture {
+        DragGesture(minimumDistance: 0)
+            .onChanged { v in
+                collapseTask?.cancel()
+                if !expanded {
+                    expanded = true
+                    return
+                }
+                // 触れる範囲の原点は (0, centerY - expandedRadius)。
+                // 弧の中心はその原点から見て (0, expandedRadius) にある
+                select(at: v.location, centerY: expandedRadius)
+            }
+            .onEnded { _ in scheduleCollapse() }
     }
 
     // MARK: - 選択
