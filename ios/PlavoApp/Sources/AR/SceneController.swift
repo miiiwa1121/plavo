@@ -76,6 +76,8 @@ final class SceneController: NSObject {
     private(set) var captureResolution = "—"
     private(set) var hdrEnabled = false
     private(set) var isCapturing = false
+    /// セッションが動いているか。止まったまま戻ると画面が固まる
+    private(set) var isRunning = false
 
     /// 映像の質。
     ///
@@ -125,6 +127,8 @@ final class SceneController: NSObject {
     private weak var arView: ARView?
     private var model: AppModel?
     private var worldPosition: SIMD3<Float>?
+    /// 再開のために覚えておく。作り直すとトラッキングが初期化されてしまう
+    private var configuration: ARWorldTrackingConfiguration?
 
     // MARK: - 起動
 
@@ -174,6 +178,7 @@ final class SceneController: NSObject {
         }
         selectedVideoFormat = Self.describe(config.videoFormat)
         captureResolution = Self.captureDescription(config.videoFormat)
+        configuration = config
 
         // HDR が使える形式なら有効にする。逆光の植物で効く
         if config.videoFormat.isVideoHDRSupported {
@@ -187,6 +192,7 @@ final class SceneController: NSObject {
             config.maximumNumberOfTrackedImages = 1
         }
         view.session.run(config, options: [.resetTracking, .removeExistingAnchors])
+        isRunning = true
     }
 
     /// 対応する中で最も条件のよい映像形式。
@@ -257,8 +263,29 @@ final class SceneController: NSObject {
         return UIImage(cgImage: cg).jpegData(compressionQuality: 0.9)
     }
 
+    /// 画面を離れるときに止める。
+    ///
+    /// 展示では発熱とバッテリーが効くため、他のタブにいる間はカメラを回さない。
+    /// **アンカーと検出結果は残す。**戻ったときに続きから見えるように。
+    func pause() {
+        arView?.session.pause()
+        isRunning = false
+    }
+
+    /// 画面に戻ったときに再開する。
+    ///
+    /// **リセットは掛けない。**掛けるとトラッキングが初期化され、
+    /// 吹き出しの位置が失われる。復帰に任せて、同じ空間の続きとして扱う。
+    func resume() {
+        guard let arView, let config = configuration else { return }
+        arView.session.run(config)
+        isRunning = true
+    }
+
+    /// 完全に終える。設定ごと捨てる
     func stop() {
         arView?.session.pause()
+        isRunning = false
         subject = .none
         worldPosition = nil
         bubbleScreenPoint = nil

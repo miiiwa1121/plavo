@@ -16,6 +16,7 @@ struct CameraTab: View {
 
     /// 撮影の結果を短く知らせる
     @State private var captureNotice: String?
+    @Environment(\.scenePhase) private var scenePhase
 
     /// 未登録の植物を検出したときの名前入力（D9）。
     /// 専用の登録画面を作らず、登録という作業を出会いという体験に溶かす。
@@ -57,8 +58,21 @@ struct CameraTab: View {
         .animation(.spring(duration: 0.35), value: scene.bubbleScreenPoint)
         .animation(.spring(duration: 0.35), value: line)
         .animation(.spring(duration: 0.3), value: isNaming)
-        .onAppear { scene.bind(model: model) }
-        .onDisappear { scene.stop() }
+        .onAppear {
+            scene.bind(model: model)
+            // タブに戻ったときにセッションを再開する。
+            // これが無いと止まったままになり、最後のフレームが残って固まる
+            scene.resume()
+        }
+        .onDisappear { scene.pause() }
+        // アプリが背面に回るとARは止まる。前面に戻ったら再開する
+        .onChange(of: scenePhase) { _, phase in
+            switch phase {
+            case .active: scene.resume()
+            case .background, .inactive: scene.pause()
+            @unknown default: break
+            }
+        }
         .onChange(of: scene.subject) { _, subject in respond(to: subject) }
         .onReceive(tick) { _ in dryIfMocked() }
     }
@@ -342,6 +356,7 @@ struct CameraTab: View {
                 .pickerStyle(.segmented)
                 .frame(width: 170)
             }
+            row("セッション", scene.isRunning ? "稼働中" : "停止中")
             row("トラッキング", scene.trackingDescription)
             row("特徴点", "\(scene.featurePointCount)")
             row(
