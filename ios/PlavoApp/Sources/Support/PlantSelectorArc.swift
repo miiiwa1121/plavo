@@ -19,10 +19,10 @@ struct PlantSelectorArc: View {
 
     /// 押し始めてから開くまでの間。
     /// 触れた瞬間に開くと長押しの感じがなく、意図せず開いてしまう
-    private let pressBeforeOpen: Duration = .milliseconds(200)
+    private let pressBeforeOpen: Duration = .milliseconds(175)
     /// 開いたあと、触られなければ自動で閉じるまでの時間。
     /// 長く残ると映像の邪魔になる
-    private let idleBeforeCollapse: Duration = .seconds(0.3)
+    private let idleBeforeCollapse: Duration = .seconds(0.2)
 
     /// 縦の置き場所。画面中央からのずれ。持ち方に合わせて動かせる
     /// 未設定なら 0。`object(forKey:) as? Double` は型が合わず取りこぼす
@@ -51,20 +51,24 @@ struct PlantSelectorArc: View {
     // **中心を画面の外へ出し、大きな円の浅い一部だけを見せる。**
     // iPhone のカメラのズームと同じ作り。円を丸ごと描き、
     // 画面の縁が切り取ることで、縁から生えた弧になる。
-    /// 半径と中心の差が、画面に出っ張る量になる（400-310 なら 90pt）。
-    /// 半径を大きくすると弧は緩やかになるが、縦にも広がって映像を覆う。
-    /// 出っ張りを保ったまま縦を抑えるには、半径ごと詰める。
-    private let openRadius: CGFloat = 225
+    /// 半径と中心の差が、画面に出っ張る量になる。
+    ///
+    /// 形は「出っ張り ÷ 縦半分」の比で決まる。参考にした iPhone のズームは
+    /// この比が約 0.63。中心を縁に寄せるほど深い弧に、遠ざけるほど浅くなる。
+    /// 半径は弧全体の大きさを、中心の位置は深さを決める。
+    private let openRadius: CGFloat = 169
     /// 中心の横位置。負の値だけ画面の外に出る
-    private let openCenterX: CGFloat = -157
-    private let maxSpread: Double = 40
+    private let openCenterX: CGFloat = -73
+    /// 半径が小さいぶん、同じ角度でも名前の間隔が詰まる。
+    /// 読める間隔を保つために広めに取る
+    private let maxSpread: Double = 56
 
     private var plants: [Plant] { model.store.plants }
 
     /// 実際に使う広がり。
     /// 株が少ないときまで上限いっぱいに広げると、名前が弧の両端に張り付く
     private var spread: Double {
-        min(maxSpread, 17 * Double(max(1, plants.count - 1)))
+        min(maxSpread, 24 * Double(max(1, plants.count - 1)))
     }
 
     private var radius: CGFloat { expanded ? openRadius : closedRadius }
