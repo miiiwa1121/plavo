@@ -25,8 +25,8 @@ struct PlantSelectorArc: View {
     private let idleBeforeCollapse: Duration = .seconds(0.7)
 
     /// 縦の置き場所。画面中央からのずれ。持ち方に合わせて動かせる
-    @State private var barOffset: CGFloat = UserDefaults.standard
-        .object(forKey: "arcOffset") as? Double ?? 0
+    /// 未設定なら 0。`object(forKey:) as? Double` は型が合わず取りこぼす
+    @State private var barOffset: CGFloat = UserDefaults.standard.double(forKey: "arcOffset")
     @State private var dragBaseOffset: CGFloat = 0
     @State private var pressTask: Task<Void, Never>?
     @State private var mode: Mode = .idle
@@ -73,10 +73,14 @@ struct PlantSelectorArc: View {
                 // **閉じた半円と開いた弧を、同じ図形の変形として扱う。**
                 // 別のビューに差し替えると、消えて出てくる動きになり、
                 // 「広がった」ように見えない。
+                // 帯は自分の枠の中央を弧の中心にする。
+                // 名前は centerY（＝画面中央＋ずらし）を基準に置くので、
+                // **帯にも同じずらしを掛けないと、動かしたときに離れる。**
                 ArcBand(radius: radius, halfAngle: halfAngle, width: width)
                     .fill(.ultraThinMaterial)
                     .shadow(color: .black.opacity(0.22), radius: 8)
                     .frame(width: openRadius + openWidth / 2, height: geo.size.height)
+                    .offset(y: barOffset)
 
                 ForEach(Array(plants.enumerated()), id: \.element.id) { index, plant in
                     nameLabel(plant)
