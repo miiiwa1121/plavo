@@ -46,6 +46,13 @@ final class SceneController: NSObject {
     private var lastDetectionAt: TimeInterval = 0
     private var isDetecting = false
 
+    /// 検出を止めているか。
+    ///
+    /// 撮った1枚を確かめているあいだ、**映像の側で勝手に相手が決まってしまう**のを防ぐ。
+    /// 止めるのは検出だけで、セッションは回したままにする。止めると復帰に時間がかかり、
+    /// 確認から戻ったときに画面が固まって見える。
+    var isDetectionSuspended = false
+
     /// 直近の検出にかかった時間。デバッグと間隔の調整に使う
     private(set) var lastDetectionDuration: TimeInterval = 0
 
@@ -77,6 +84,9 @@ final class SceneController: NSObject {
     /// 背景が変わっても色が動かなかった。ARKit が毎フレーム渡してくる
     /// 明るさの推定値を使い、自前で色を決める。
     private(set) var ambientBrightness: Double = 0.3
+    /// 平滑化の途中の値。**細かい変化をそのまま配らないための受け皿。**
+    /// 弧はこれを見て色を決めるので、毎フレーム動かすとそのたびに組み直される
+    private var smoothedBrightness: Double = 0.3
 
     /// 選んだ映像形式。画質の確認に使う
     private(set) var selectedVideoFormat = "—"
@@ -306,6 +316,21 @@ final class SceneController: NSObject {
         attach(to: arView)
     }
 
+    /// 撮った1枚で確かめた相手を、そのまま今の対象として受け取る（植物の追加）。
+    ///
+    /// 確認のあとに映像から検出し直すと、同じ植物でも見つかるまで間が空き、
+    /// **「話しかける」を押した手応えが消える。**確かめたのはこの子だという
+    /// 判断を引き継ぎ、その場でアンカーを打つ。
+    ///
+    /// 枠が取れていなければ画面の中ほどに置く。見つけられなかったことを
+    /// 理由に断らない（原則3）。
+    func adoptPlant(atNormalizedBox box: CGRect?) {
+        isDetectionSuspended = false
+        smoothedPoint = nil
+        placeAnchor(forNormalizedBox: box ?? CGRect(x: 0.3, y: 0.25, width: 0.4, height: 0.5))
+        subject = .plant
+    }
+
     /// アンカーを捨てて、もう一度検出からやり直す。検証で繰り返し試すときに使う
     func redetect() {
         subject = .none
@@ -338,6 +363,20 @@ final class SceneController: NSObject {
     }
 
     // MARK: - 植物の検出
+
+    /// 植物を探してよい状態か（D40-a）。
+    ///
+    /// **誰を見ているのかが決まっていないなら探さない。**株が1つも無い、
+    /// あるいはどれも選ばれていないときに勝手に見つけると、
+    /// 相手が定まらないまま話しかけることになる。見当たらない扱いにする。
+    ///
+    /// 迎えるときは、撮った1枚から `adoptPlant(atNormalizedBox:)` で受け取るため
+    /// この経路を通らない。**新しい株はシャッターからしか増えない。**
+    ///
+    /// パネル（画像アンカー）はここを通らないので、選択の有無に関わらず動く。
+    private var canDetectPlant: Bool {
+        model?.store.selectedPlant != nil
+    }
 
     private func detectPlant(in frame: ARFrame) {
         guard !isDetecting else { return }
@@ -570,7 +609,9 @@ extension SceneController: ARSessionDelegate {
         Task { @MainActor in
             self.updateDiagnostics(frame)
             self.project(frame)
-            guard case .none = self.subject else { return }
+            guard case .none = self.subject, !self.isDetectionSuspended,
+                self.canDetectPlant
+            else { return }
             // トラッキングが安定するまで検出しない。
             // 初期化中に打ったアンカーは位置が信用できず、吹き出しが飛ぶ原因になる。
             guard case .normal = frame.camera.trackingState else { return }
@@ -589,7 +630,12 @@ extension SceneController: ARSessionDelegate {
             // ambientIntensity は概ね 0〜2000 ルーメン。1000 が中庸。
             // そのまま使うと照明のちらつきで色が揺れるので、なめらかに追う
             let target = min(1, max(0, light.ambientIntensity / 1800))
-            ambientBrightness += (target - ambientBrightness) * 0.08
+            smoothedBrightness += (target - smoothedBrightness) * 0.08
+            // **色として見て分かる差になったときだけ知らせる。**
+            // 毎フレーム配ると、これを見ている弧が毎フレーム組み直される
+            if abs(smoothedBrightness - ambientBrightness) >= 0.02 {
+                ambientBrightness = smoothedBrightness
+            }
         }
         switch frame.camera.trackingState {
         case .normal:

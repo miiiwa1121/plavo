@@ -20,7 +20,23 @@ struct PlantConfirmView: View {
 
     var body: some View {
         ZStack {
-            Color.black.ignoresSafeArea()
+            // 写真は画面いっぱいに。ここだけ安全領域の外まで広げる
+            photo.ignoresSafeArea()
+
+            // **操作はタブバーに重ねない。**安全領域の内側に置く。
+            // 写真と一緒に外まで広げると、「話しかける」がタブに乗ってしまう
+            VStack {
+                Spacer()
+                caption
+                buttons
+            }
+            .padding(.bottom, 12)
+        }
+    }
+
+    private var photo: some View {
+        ZStack {
+            Color.black
 
             GeometryReader { geo in
                 let size = captured.image.size
@@ -46,13 +62,6 @@ struct PlantConfirmView: View {
                     }
                 }
             }
-
-            VStack {
-                Spacer()
-                caption
-                buttons
-            }
-            .padding(.bottom, 34)
         }
     }
 

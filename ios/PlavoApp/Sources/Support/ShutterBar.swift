@@ -40,6 +40,9 @@ struct ShutterBar: View {
 
     private let bigSize: CGFloat = 72
     private let smallSize: CGFloat = 42
+    /// 記号の大きさ。**選択によらず変えない。**
+    /// ボタンの大きさに比例させると、切り替えのたびに字が組み直されて揺れる
+    private let symbolSize: CGFloat = 18
     private let spacing: CGFloat = 20
     /// これ以上滑らせたら隣へ移る
     private let switchThreshold: CGFloat = 34
@@ -55,6 +58,11 @@ struct ShutterBar: View {
         // 選択中がいつも画面の中央に来るようにずらす
         .offset(x: centeringOffset)
         .animation(.spring(duration: 0.3), value: mode)
+        // **滑らせる範囲を画面の幅いっぱいに取る。**
+        // ボタンの上だけだと的が 130pt ほどしかなく、切り替えたいのに
+        // 空振りする。切り替えは下端のどこを滑らせても効くようにする
+        .frame(maxWidth: .infinity)
+        .contentShape(Rectangle())
         .gesture(
             DragGesture(minimumDistance: 12)
                 .onEnded { v in
@@ -83,11 +91,15 @@ struct ShutterBar: View {
                 Circle().stroke(.white.opacity(selected ? 1 : 0.6), lineWidth: selected ? 3 : 2)
                 Circle().fill(.white).padding(selected ? 7 : 5)
                 if let symbol = m.symbol {
+                    // **記号を塗らず、くり抜く。**黒で描くと点で乗って見えるが、
+                    // 抜けば向けている先がそこに透ける
                     Image(systemName: symbol)
-                        .font(.system(size: size * 0.34, weight: .bold))
-                        .foregroundStyle(.black.opacity(0.75))
+                        .font(.system(size: symbolSize, weight: .bold))
+                        .blendMode(.destinationOut)
                 }
             }
+            // くり抜きを効かせるために、この重なりを一度まとめて描く
+            .compositingGroup()
             .frame(width: size, height: size)
         }
         .disabled(disabled && selected)

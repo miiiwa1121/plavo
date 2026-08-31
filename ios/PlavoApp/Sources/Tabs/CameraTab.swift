@@ -21,6 +21,8 @@ struct CameraTab: View {
     @State private var shutterMode: ShutterMode = .capture
     /// 植物の追加で止めている1枚。確認のあいだ画面に残す
     @State private var pendingCapture: CapturedPlant?
+    /// 左下の1枚を開いているか。開いている写真の参照を持つ（D42）
+    @State private var expandedPhoto: String?
     /// いま新しい株を迎えている最中か。
     /// 2株目以降は「まだ誰もいない」条件では拾えないため、これで見分ける
     @State private var addingPlant = false
@@ -52,12 +54,22 @@ struct CameraTab: View {
                         .position(point)
                         .id(line)
                         .transition(.scale(scale: 0.8).combined(with: .opacity))
+                        // 吹き出しの位置はARの投影で決まる。
+                        // キーボードで座標系がずれると、植物から離れる
+                        .ignoresSafeArea(.keyboard)
                 }
 
                 if isNaming { namingField }
 
-                overlay
-                shutter
+                overlay.ignoresSafeArea(.keyboard)
+                // 名前を入れている間は出さない。撮る場面ではないし、
+                // タブバーを退けたぶんだけ下にずれて見える
+                if pendingCapture == nil, !isNaming {
+                    // **キーボードで持ち上げない。**名前を入れている間、
+                    // シャッターまで一緒に上がってくる
+                    shutter.ignoresSafeArea(.keyboard)
+                    recentPhoto.ignoresSafeArea(.keyboard)
+                }
             } else {
                 ARUnavailableView(
                     reason: "ARKit はシミュレータで動作しません。実機で確認してください。")
@@ -65,11 +77,53 @@ struct CameraTab: View {
 
             // どの株を見ているか（D39）。
             // ARの可否とは無関係なので、分岐の外に置く
-            PlantSelectorArc(model: model, autoSelectedAt: model.autoSelectedAt)
+            PlantSelectorArc(
+                model: model,
+                autoSelectedAt: model.autoSelectedAt,
+                // 実測した明るさで弧の色を決める。渡さないと既定値のまま動かない
+                ambientBrightness: scene.ambientBrightness,
+                // 「迎える」に切り替えているあいだは弧を退かせる。
+                // 選択肢の「未設定」とは別物
+                receding: shutterMode == .addPlant
+            )
+            .ignoresSafeArea(.keyboard)
+
+            // 撮った1枚を止めて相手を確かめる（植物の追加）。
+            // **弧より上に重ねる。**確認中は他に触れる先を作らない
+            if let captured = pendingCapture {
+                PlantConfirmView(
+                    captured: captured,
+                    onTalk: startTalking,
+                    onRetake: retake
+                )
+                .transition(.opacity)
+                .zIndex(1)
+            }
+
+            // 左下の1枚を開いたところ（D42）
+            if let ref = expandedPhoto, let data = model.store.image(ref),
+                let image = UIImage(data: data)
+            {
+                PhotoOverlay(image: image) { expandedPhoto = nil }
+                    .transition(.opacity)
+                    .zIndex(2)
+            }
         }
         .animation(.spring(duration: 0.35), value: scene.bubbleScreenPoint)
         .animation(.spring(duration: 0.35), value: line)
         .animation(.spring(duration: 0.3), value: isNaming)
+        .animation(.easeInOut(duration: 0.22), value: pendingCapture?.id)
+        .animation(.spring(duration: 0.3), value: model.store.selectedPlantId)
+        .animation(.easeInOut(duration: 0.22), value: expandedPhoto)
+        // **名前を入れている間はタブバーを退ける。**
+        //
+        // 残すとキーボードと一緒に持ち上がり、「カメラ」「マイプラント」が
+        // 画面の中ほどに出てくる。タブバーは TabView のもので、こちらの
+        // `.ignoresSafeArea(.keyboard)` では止められない。
+        //
+        // 隠しても見え方は変わらない。その場に留めたところで、
+        // どのみちキーボードの下に隠れる位置にある
+        .toolbar(isNaming ? .hidden : .visible, for: .tabBar)
         .onAppear {
             scene.bind(model: model)
             // タブに戻ったときにセッションを再開する。
@@ -86,6 +140,13 @@ struct CameraTab: View {
             }
         }
         .onChange(of: scene.subject) { _, subject in respond(to: subject) }
+        // 見ている株が居なくなったら（削除・リセット）見当たらない状態に戻す。
+        // 吹き出しだけが残ると、誰に話しかけられているのか分からなくなる
+        .onChange(of: model.store.selectedPlantId) { _, id in
+            guard id == nil, !addingPlant else { return }
+            scene.redetect()
+            line = ""
+        }
         .onReceive(tick) { _ in dryIfMocked() }
     }
 
@@ -96,10 +157,14 @@ struct CameraTab: View {
         case .none:
             line = ""
             isNaming = false
+            // 迎える途中で相手を見失ったら、その迎え入れは終わりにする。
+            // 残しておくと、次に別の株を見たときに「はじめまして」と言い出す
+            addingPlant = false
         case .plant:
-            // まだ誰もいないとき、または新しい株を迎えているときは
-            // 出会いから始める（D9）
-            if addingPlant || model.store.selectedPlant == nil {
+            // 迎えている最中のときだけ、出会いから始める（D9・D40-a）。
+            // **向けただけでは新しい株は増えない。**シャッターの「迎える」を
+            // 通っていないなら、相手はすでに選ばれている株に決まっている
+            if addingPlant {
                 line = "はじめまして。名前をつけてくれる？"
                 isNaming = true
                 nameFieldFocused = true
@@ -151,6 +216,11 @@ struct CameraTab: View {
     private func dryIfMocked() {
         guard !model.usingRealSensor, case .plant = scene.subject else { return }
         model.updateMoisture(max(0, model.soilMoisture - dryingRate * 0.5))
+        // **名前をつけている間はセリフを引き直さない。**
+        // 引き直すと「はじめまして。名前をつけてくれる？」が
+        // 0.5秒後の最初の刻みで水分のセリフに置き換わる。
+        // 土は乾かし続けるが、言うことは出会いのまま止めておく
+        guard !isNaming else { return }
         refreshLine(force: false)
     }
 
@@ -172,6 +242,66 @@ struct CameraTab: View {
         }
     }
 
+    /// 直近に撮った1枚（D42）。カメラアプリと同じく左下に置く。
+    ///
+    /// **撮ったものがどこへ行ったのか分からない**のが元の状態だった。
+    /// 「日記に追加しました」と一言出るだけで、確かめるには日記のタブへ
+    /// 移るしかない。撮ってすぐ目に入る場所に、最後の1枚を残しておく。
+    ///
+    /// シャッターと同じ高さに置く。撮る手と見る目が同じ帯に収まる。
+    ///
+    /// **1枚も撮っていないうちから枠を置く。**置き場所は撮る前から決まっている。
+    private var recentPhoto: some View {
+        VStack {
+            Spacer()
+            HStack {
+                thumbnail
+                Spacer()
+            }
+            .padding(.leading, 22)
+            // シャッター（高さ72・下余白28）の中心に合わせる
+            .padding(.bottom, 28 + (72 - thumbnailSize) / 2)
+        }
+    }
+
+    /// 左下の中身。**撮る前でも枠だけは置く。**
+    ///
+    /// 何も無いところに1枚目が現れると、撮ったものがどこへ行ったのかを
+    /// その瞬間に見ていないと分からない。**先に空の枠が見えていれば、
+    /// 撮る前から行き先が分かり、撮ったあとはそこが埋まるだけになる。**
+    @ViewBuilder
+    private var thumbnail: some View {
+        if let ref = model.store.latestPhotoRef, let data = model.store.image(ref),
+            let image = UIImage(data: data)
+        {
+            Button { expandedPhoto = ref } label: {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: thumbnailSize, height: thumbnailSize)
+                    .clipShape(thumbnailShape)
+                    .overlay { thumbnailShape.stroke(.white.opacity(0.85), lineWidth: 2) }
+                    .shadow(color: .black.opacity(0.4), radius: 5, y: 1)
+            }
+            .transition(.scale(scale: 0.6).combined(with: .opacity))
+        } else {
+            thumbnailShape
+                // **地を敷く。**線だけだと映像が枠の中を素通りして、
+                // 空いている場所ではなく映像に乗った線に見える
+                .fill(.black.opacity(0.25))
+                .frame(width: thumbnailSize, height: thumbnailSize)
+                .overlay { thumbnailShape.stroke(.white.opacity(0.85), lineWidth: 2) }
+                .shadow(color: .black.opacity(0.4), radius: 5, y: 1)
+                // **触れる先にしない。**開く1枚がまだ無い。
+                // ここは下端を滑らせてシャッターを切り替える帯でもある
+                .allowsHitTesting(false)
+        }
+    }
+
+    private var thumbnailSize: CGFloat { 52 }
+    /// 枠と切り抜きで同じ形を使う。片方だけ角丸が変わると線がずれる
+    private var thumbnailShape: RoundedRectangle { RoundedRectangle(cornerRadius: 10) }
+
     private func fire() async {
         switch shutterMode {
         case .capture: await capture()
@@ -179,30 +309,46 @@ struct CameraTab: View {
         }
     }
 
-    /// 迎えるための1枚を撮り、そこから植物を探す
+    /// 迎えるための1枚を撮り、そこから植物を探す。
+    /// 撮れたらその1枚で画面を止め、確認に移る
     private func captureForAdd() async {
         guard let data = await scene.capturePhoto(), let image = UIImage(data: data) else {
             captureNotice = "撮れませんでした"
             return
         }
         let analysis = SceneController.analyze(image: image)
+        // 確認のあいだは、いま見ている相手を一度手放して検出も止める。
+        // 止めないと、確かめている裏で映像の側が別の相手を決めてしまう
+        scene.redetect()
+        scene.isDetectionSuspended = true
+        line = ""
         pendingCapture = CapturedPlant(
             image: image, box: analysis?.box, plantScore: analysis?.plantScore ?? 0)
     }
 
-    /// 確認を終えて、通常の画面に戻る。
-    /// 戻ったところで植物が「はじめまして」と話しかけてくる
-    private func startTalking() {
+    /// 確認をやめて、もう一度撮る
+    private func retake() {
         pendingCapture = nil
+        scene.isDetectionSuspended = false
+        scene.redetect()
+    }
+
+    /// 確認を終えて、通常の画面に戻る。
+    /// 戻ったところで、確かめたその子が「はじめまして」と話しかけてくる
+    private func startTalking() {
+        guard let captured = pendingCapture else { return }
         addingPlant = true
         shutterMode = .capture
-        scene.redetect()
+        pendingCapture = nil
         line = ""
+        // 確かめた相手をそのまま引き継ぐ。対象が植物に変わり、
+        // respond(to:) が「はじめまして」を出す
+        scene.adoptPlant(atNormalizedBox: captured.box)
     }
 
     private func capture() async {
         guard let plantId = model.store.plantForToday else {
-            captureNotice = "先に植物を登録してください"
+            captureNotice = "先に「迎える」で迎えてね"
             return
         }
         model.store.ensureTodayPage()
@@ -229,14 +375,20 @@ struct CameraTab: View {
     @ViewBuilder
     private var overlay: some View {
         VStack {
-            if case .panel(_, let caption) = scene.subject {
-                Text(caption)
-                    .font(.callout.weight(.medium))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 18).padding(.vertical, 10)
-                    .background(.black.opacity(0.4), in: Capsule())
-                    .padding(.top, 12)
+            // 上中央は「いま誰を見ているか」の場所。
+            // アイコンが上、パネルのキャプションはその下に続く
+            VStack(spacing: 8) {
+                selectedPlantBadge
+
+                if case .panel(_, let caption) = scene.subject {
+                    Text(caption)
+                        .font(.callout.weight(.medium))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 18).padding(.vertical, 10)
+                        .background(.black.opacity(0.4), in: Capsule())
+                }
             }
+            .padding(.top, 12)
 
             Spacer()
 
@@ -265,6 +417,37 @@ struct CameraTab: View {
         .padding(.bottom, 116)
         .contentShape(Rectangle())
         .onLongPressGesture(minimumDuration: 1.5) { showMockControls.toggle() }
+    }
+
+    /// いまどの株を見ているか（D41）。
+    ///
+    /// **弧を開かなくても、常に画面の上に出ている。**弧は触らないと
+    /// 何も語らないので、見ている相手が分かるのは触れた一瞬だけだった。
+    ///
+    /// **名前もここに置く。**弧は閉じているあいだ無地の半円でいるので、
+    /// 名前の置き場所はここひとつになる。
+    ///
+    /// 未設定なら何も出さない。誰も見ていないことは、
+    /// 何も無いことで伝わる（D40-a）。
+    @ViewBuilder
+    private var selectedPlantBadge: some View {
+        // 迎えている最中は弧と一緒に引っ込む。
+        // これから迎える相手と、いま選ばれている株を並べない
+        if let plant = model.store.selectedPlant, shutterMode != .addPlant {
+            VStack(spacing: 6) {
+                PlantAvatar(plant: plant, model: model, size: 44)
+                    .overlay(Circle().stroke(.white.opacity(0.85), lineWidth: 2))
+                    .shadow(color: .black.opacity(0.35), radius: 6, y: 1)
+
+                Text(plant.name)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                    .padding(.horizontal, 10).padding(.vertical, 4)
+                    .background(.black.opacity(0.4), in: Capsule())
+            }
+            .transition(.scale(scale: 0.6).combined(with: .opacity))
+        }
     }
 
     /// 実センサーが繋がるまでの代替操作と、ARの診断表示。

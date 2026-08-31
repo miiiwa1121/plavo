@@ -350,6 +350,14 @@ final class PlantStore {
 
     func image(_ ref: String) -> Data? { images[ref] }
 
+    /// 直近に撮った1枚（D42）。
+    ///
+    /// 日記は新しい順に並び、その日のページの中では撮った順に積まれる。
+    /// 写真のあるいちばん新しいページの、いちばん後ろが最後の1枚になる。
+    var latestPhotoRef: String? {
+        diary.first { !$0.photoRefs.isEmpty }?.photoRefs.last
+    }
+
     /// その株の写真を、新しい順に集める。
     ///
     /// 日記は全体で一つだが、**写真は撮った対象が決まっている。**
