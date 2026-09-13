@@ -30,6 +30,8 @@ public struct PlantProfile: Sendable, Equatable {
     public let humidityRange: ClosedRange<Double>
     /// 養分 EC mS/cm
     public let ecRange: ClosedRange<Double>
+    /// 土の pH。nil なら育成に適正範囲を出さない
+    public let soilPhRange: ClosedRange<Double>?
 
     /// 性格の記述。セリフの個性のもとになる
     public let character: String
@@ -53,7 +55,8 @@ public struct PlantProfile: Sendable, Equatable {
         humidityRange: ClosedRange<Double>,
         ecRange: ClosedRange<Double>,
         character: String,
-        naturalCompletionStage: GrowthStage?
+        naturalCompletionStage: GrowthStage?,
+        soilPhRange: ClosedRange<Double>? = nil
     ) {
         self.id = id
         self.displayName = displayName
@@ -67,6 +70,7 @@ public struct PlantProfile: Sendable, Equatable {
         self.tempRange = tempRange
         self.humidityRange = humidityRange
         self.ecRange = ecRange
+        self.soilPhRange = soilPhRange
         self.character = character
         self.naturalCompletionStage = naturalCompletionStage
     }
@@ -88,7 +92,9 @@ extension PlantProfile {
         humidityRange: 40...70,
         ecRange: 1.0...2.0,
         character: "日光を強く求める。太陽を追い、背を伸ばしたがる",
-        naturalCompletionStage: .bloom
+        naturalCompletionStage: .bloom,
+        // pH には鈍感で 5.7〜8 でも育つが、よく育つのは中性付近（Purdue / UMN Extension）
+        soilPhRange: 6.0...7.5
     )
 
     /// ポトス。多年草で丈夫だが、室内ではまず開花しないため天寿を判定できない

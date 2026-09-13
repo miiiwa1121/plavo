@@ -4,7 +4,7 @@ plavo の iOS 実装。技術スタックは Swift + SwiftUI + ARKit + Vision + 
 
 | ディレクトリ | 内容 | 状態 |
 |---|---|---|
-| [PlavoCore/](./PlavoCore/) | ドメイン層の Swift Package。UI にも AR にも依存しない | **動作する。19件のテストが通る** |
+| [PlavoCore/](./PlavoCore/) | ドメイン層の Swift Package。UI にも AR にも依存しない | **動作する。33件のテストが通る** |
 | PlavoApp/ | アプリ本体（タブ・AR・カメラ） | 未着手 |
 
 ## PlavoCore
@@ -24,6 +24,8 @@ swift test
 | `PlantProfile.swift` | 植物種に依存する知識。差し替え式（D17-a） |
 | `Metrics.swift` | 導出指標（DLI / GDD / VPD / 水やり検出 / 生育段階） |
 | `DialogueBank.swift` | セリフのプールの読み込みと選択 |
+| `MetricCatalog.swift` | 育成のグラフに出す項目の定義（D44）。**項目を足すときはここに1行** |
+| `MetricSeries.swift` | 項目ごとの値の列・まとめ方・日長の計算・10分ごとの平均・同梱ファイルの読み込み |
 
 ### TypeScript版との同値性
 
@@ -36,6 +38,10 @@ server/fixtures/sensors/*.json
 ```
 
 片方だけ直すと期待値がずれて気づける。
+
+### ひまりの仮データとの結びつき
+
+`MetricSeriesTests` は `server/fixtures/growth/himari.json`（`npm run gen:growth` で生成）を読み、**時系列パネルの筋書きと食い違っていないか**を確かめる。水切れの日に15%を下回って水やりが1回検出されること、開花のパネルの日に積算温度が開花の目安に届くこと。パネルの日付を動かしたら、データを作り直さないとテストが落ちる。
 
 ### セリフのプールとの結びつき
 

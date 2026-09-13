@@ -8,6 +8,7 @@
     "build": "tsc",
     "typecheck": "tsc --noEmit",
     "gen:fixtures": "tsx src/fixtures/generate.ts",
+    "gen:growth": "tsx src/fixtures/growth.ts",
     "test:metrics": "tsx src/domain/metrics.test.ts",
     "verify": "tsx src/verify/run.ts",
     "check:dialogues": "tsx src/content/check.ts",

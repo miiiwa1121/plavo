@@ -19,6 +19,13 @@ final class PlantStore {
     private(set) var observations: [UUID: [PlantObservation]] = [:]
     private(set) var diary: [DiaryEntry] = []
 
+    /// 育成のグラフの値。株ごと・項目ごとの列（D44）。
+    /// 登録した株の分はセッション内だけ持つ（D36）
+    private(set) var growth: [UUID: [MetricID: MetricSeries]] = [:]
+    /// 10分の区切りが閉じるまでの途中の値。
+    /// 1秒ごとに書き換わるので、画面に追わせない（区切りが閉じたときだけ growth を書き換える）
+    @ObservationIgnored private var bucketers: [UUID: [MetricID: MetricBucketer]] = [:]
+
     /// 写真の実体。参照名から引く。
     /// D36 により永続化しないため、メモリに置く。リセットで消える。
     private(set) var images: [String: Data] = [:]
@@ -41,10 +48,11 @@ final class PlantStore {
     ///
     /// 展示では記録が積み上がる時間がないため、あらかじめ用意する。
     /// これがマイプラントと日記の中身になり、時系列パネルとも一致する。
-    func seed(from bank: DialogueBank, profile: PlantProfile) {
+    func seed(from bank: DialogueBank, profile: PlantProfile, growth growthFile: GrowthRecordFile) {
         guard seededPlantId == nil else { return }
         seedSource = bank
         seedProfile = profile
+        seedGrowth = growthFile
 
         // パネルの最終日から逆算して、出会った日を決める。
         //
@@ -64,6 +72,8 @@ final class PlantStore {
         )
         plants.append(plant)
         seededPlantId = plant.id
+        // 一生分の計測値（D44）。ファイルは出会った日の0時から数えている
+        growth[plant.id] = growthFile.series(startingAt: Calendar.current.startOfDay(for: plantedAt))
         // **選択中にはしない。**
         // 選択済みにすると、カメラを向けても「はじめまして」が出ず、
         // D9 の登録フローが一度も見られなくなる。
@@ -262,6 +272,8 @@ final class PlantStore {
         if let avatar = plant(plantId)?.avatarRef { images[avatar] = nil }
         plants.removeAll { $0.id == plantId }
         observations[plantId] = nil
+        growth[plantId] = nil
+        bucketers[plantId] = nil
         diary.removeAll { $0.plantId == plantId }
         if selectedPlantId == plantId { selectedPlantId = nil }
     }
@@ -270,6 +282,23 @@ final class PlantStore {
 
     func record(_ observation: PlantObservation, for plantId: UUID) {
         observations[plantId, default: []].append(observation)
+    }
+
+    /// 届いた計測値を積む。10分ごとの平均にまとめる（D44）
+    func recordMeasurement(_ value: Double, metric: MetricID, for plantId: UUID, at date: Date = Date()) {
+        var bucketer =
+            bucketers[plantId]?[metric]
+            ?? MetricBucketer(interval: MetricCatalog.definition(metric)?.interval ?? 600)
+        let confirmed = bucketer.add(value, at: date)
+        bucketers[plantId, default: [:]][metric] = bucketer
+        if confirmed, let series = bucketer.series {
+            growth[plantId, default: [:]][metric] = series
+        }
+    }
+
+    /// 育成のグラフの値。計算で出す項目（日長）も含める
+    func growth(of plantId: UUID) -> [MetricID: MetricSeries] {
+        MetricCatalog.withDerived(growth[plantId] ?? [:])
     }
 
     func addDiary(_ entry: DiaryEntry) {
@@ -453,16 +482,19 @@ final class PlantStore {
         observations.removeAll()
         diary.removeAll()
         images.removeAll()
+        growth.removeAll()
+        bucketers.removeAll()
         seededPlantId = nil
         seededObservationCount = 0
         // 未選択に戻す。次の来場者も「はじめまして」から始まる
         selectedPlantId = nil
-        if let bank = seedSource {
-            seed(from: bank, profile: seedProfile ?? .default)
+        if let bank = seedSource, let growthFile = seedGrowth {
+            seed(from: bank, profile: seedProfile ?? .default, growth: growthFile)
         }
     }
 
     /// 作り直すために、仕込みの元を覚えておく
     private var seedSource: DialogueBank?
     private var seedProfile: PlantProfile?
+    private var seedGrowth: GrowthRecordFile?
 }

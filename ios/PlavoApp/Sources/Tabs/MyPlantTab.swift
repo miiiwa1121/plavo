@@ -6,6 +6,7 @@ import SwiftUI
 ///
 /// 原則2により、数値のダッシュボードにしない。
 /// 写真と、その日に植物が言ったことを時系列で見せる。
+/// 例外は詳細の「育成」だけで、そこでは実測値を出す（D43 / GrowthSection）。
 struct MyPlantTab: View {
     @Bindable var model: AppModel
 
@@ -151,27 +152,67 @@ struct PlantDetailView: View {
     @State private var avatarItem: PhotosPickerItem?
     /// 選んだ写真。切り抜き画面に渡す
     @State private var cropTarget: PickedImage?
-    /// 情報とギャラリーの行き来。スライドでも切り替わる
+    /// 記録・育成・ギャラリーの行き来。スライドでも切り替わる
     @State private var page = 0
+    /// 上の切り替えの高さ。中身をその下から始めるために測る
+    @State private var pickerHeight: CGFloat = 47
+    /// ページの中身が、画面の上端からどれだけずれて置かれているか。測って打ち消す
+    @State private var pageShift: CGFloat = 0
     @Environment(\.dismiss) private var dismiss
 
     private var plant: Plant? { model.store.plant(plantId) }
 
     var body: some View {
-        VStack(spacing: 0) {
-            Picker("", selection: $page) {
-                Text("情報").tag(0)
-                Text("ギャラリー").tag(1)
-            }
-            .pickerStyle(.segmented)
-            .padding(.horizontal)
-            .padding(.bottom, 8)
+        // **帯を敷かない。日記と同じく、中身は画面の端まで流れ、操作部品はその上に浮く**（D45）。
+        //
+        // ページ形式の TabView は枠の内側しか描かず、ページの中の余白も失う。
+        // そのままだと中身がタブバーの手前でまっすぐ切れ、後ろに無地の帯があるように見える。
+        // TabView ごと画面の端まで広げ、上下の余白は各ページに足し直す。
+        //
+        // **広げたページは、画面の上端から少し下にずれて置かれる**（iPhone 17 で 16pt）。
+        // TabView はページの枠を安全領域の高さで作り、広げた中身をその上下中央に置くらしい。
+        // ずれを足さないと、時間幅のバーがタブバーに重なる。式を決め打ちせず、測って打ち消す。
+        GeometryReader { proxy in
+            let top = proxy.safeAreaInsets.top + pickerHeight - pageShift
+            let bottom = proxy.safeAreaInsets.bottom + pageShift
 
             TabView(selection: $page) {
-                info.tag(0)
-                gallery.tag(1)
+                records
+                    .safeAreaPadding(.top, top)
+                    .safeAreaPadding(.bottom, bottom)
+                    .onGeometryChange(for: CGFloat.self) {
+                        $0.frame(in: .global).minY - $0.safeAreaInsets.top
+                    } action: { pageShift = $0 }
+                    .tag(0)
+                GrowthSection(model: model, plantId: plantId)
+                    .safeAreaPadding(.top, top)
+                    .safeAreaPadding(.bottom, bottom)
+                    .tag(1)
+                gallery
+                    .safeAreaPadding(.top, top)
+                    .safeAreaPadding(.bottom, bottom)
+                    .tag(2)
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
+            .ignoresSafeArea()
+            .overlay(alignment: .top) {
+                Picker("", selection: $page) {
+                    Text("記録").tag(0)
+                    Text("育成").tag(1)
+                    Text("ギャラリー").tag(2)
+                }
+                .pickerStyle(.segmented)
+                .padding(4)
+                .floatingGlass()
+                .padding(.horizontal)
+                .padding(.bottom, 8)
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { pickerHeight = $0 }
+                // 重ねる側も画面の上端から数える。題名と時計の下に置くぶんは自分で下げる
+                .padding(.top, proxy.safeAreaInsets.top)
+                .scrollEdgeFade()
+                .frame(maxHeight: .infinity, alignment: .top)
+                .ignoresSafeArea()
+            }
         }
         .background(Color(uiColor: .systemGroupedBackground))
         .navigationTitle(plant?.name ?? "")
@@ -213,10 +254,11 @@ struct PlantDetailView: View {
         }
     }
 
-    // MARK: - 情報
+    // MARK: - 記録
 
+    /// 節目の記録。数値は出さない（原則2）
     @ViewBuilder
-    private var info: some View {
+    private var records: some View {
         List {
             if let plant {
                 // トップはアイコンだけ。操作は右下の「+」に寄せる
@@ -290,10 +332,10 @@ struct PlantDetailView: View {
                     }
                 }
 
-                let records = model.store.observations(of: plantId).reversed()
-                if !records.isEmpty {
-                    Section("記録") {
-                        ForEach(Array(records.enumerated()), id: \.offset) { _, o in
+                let history = model.store.observations(of: plantId).reversed()
+                if !history.isEmpty {
+                    Section("観察の履歴") {
+                        ForEach(Array(history.enumerated()), id: \.offset) { _, o in
                             VStack(alignment: .leading, spacing: 3) {
                                 Text(format(o.observedAt))
                                     .font(.caption).foregroundStyle(.secondary)

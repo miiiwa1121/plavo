@@ -45,7 +45,7 @@ final class AppModel {
             bank = loaded
             // すでに育ててきた1株を用意する（L-12）。
             // 展示では記録が積み上がる時間がないため、あらかじめ仕込む。
-            store.seed(from: loaded, profile: profile)
+            store.seed(from: loaded, profile: profile, growth: try Self.loadGrowth())
 
             // 起動引数で株を登録できる。
             //   例: -registerPlant そら
@@ -70,15 +70,29 @@ final class AppModel {
     func startSensor() {
         sensor.start { [weak self] payload in
             guard let self else { return }
-            self.updateMoisture(payload.soilMoisture.percent, fromRealSensor: true)
 
             // どの株を見ているかをガジェットから決める（D39）。
-            // 黙って切り替えず、UIに知らせて一度見せる
+            // 黙って切り替えず、UIに知らせて一度見せる。
+            // 水分の記録より先に解決しないと、最初の1点が誰のものか分からなくなる
             if let resolved = self.store.resolvePlant(forGadget: payload.gadgetId),
                 resolved != self.store.selectedPlantId
             {
                 self.store.selectedPlantId = resolved
                 self.autoSelectedAt = Date()
+            }
+
+            self.updateMoisture(payload.soilMoisture.percent, fromRealSensor: true)
+
+            // 土壌水分以外は任意の項目。届いたものだけ育成のグラフに積む（D44）
+            guard let plantId = self.store.selectedPlantId else { return }
+            let optional: [(MetricID, Double?)] = [
+                (.lightLux, payload.lightLux),
+                (.temperature, payload.temperature),
+                (.humidity, payload.humidity),
+                (.nutrientEc, payload.nutrientEc),
+            ]
+            for case let (metric, value?) in optional {
+                self.store.recordMeasurement(value, metric: metric, for: plantId)
             }
         }
     }
@@ -97,6 +111,16 @@ final class AppModel {
         return try DialogueBank.load(from: url)
     }
 
+    private static func loadGrowth() throws -> GrowthRecordFile {
+        guard let url = Bundle.main.url(forResource: "himari", withExtension: "json", subdirectory: "growth")
+        else {
+            throw NSError(
+                domain: "plavo", code: 2,
+                userInfo: [NSLocalizedDescriptionKey: "growth/himari.json がバンドルに含まれていません"])
+        }
+        return try GrowthRecordFile.load(from: url)
+    }
+
     // MARK: - 水分の更新
 
     /// 土壌水分を更新し、連続した水やりを検出する。
@@ -113,6 +137,10 @@ final class AppModel {
         }
         lastMoisture = value
         soilMoisture = value
+        // 育成のグラフの素材として、いま見ている株に積む（D44）
+        if let plantId = store.selectedPlantId {
+            store.recordMeasurement(value, metric: .soilMoisture, for: plantId)
+        }
     }
 
     // MARK: - セリフ

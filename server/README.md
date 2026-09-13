@@ -32,6 +32,7 @@ export ANTHROPIC_API_KEY=sk-ant-...
 | コマンド | 内容 |
 |---|---|
 | `npm run gen:fixtures` | センサーのサンプルデータセットを生成する |
+| `npm run gen:growth` | ひまりの一生分の計測値を生成する（D44）。育成のグラフに使い、アプリに同梱する |
 | `npm run test:metrics` | 導出指標の計算を検証する（API不要） |
 | `npm run verify -- --dry-run` | Claude に送る内容を確認する（API不要） |
 | `npm run verify` | 全シナリオで診断を実行する |
@@ -66,11 +67,13 @@ server/
 │   │   ├── store.test.ts     その検証
 │   │   └── mock-gadget.ts    モックのガジェット
 │   ├── fixtures/
-│   │   └── generate.ts       サンプルデータセットの生成
+│   │   ├── generate.ts       サンプルデータセットの生成
+│   │   └── growth.ts         ひまりの一生分の計測値の生成（D44）
 │   └── verify/
 │       └── run.ts            検証ハーネス
 └── fixtures/
     ├── sensors/              生成されたセンサーデータ（4シナリオ）
+    ├── growth/               ひまりの一生分の計測値（10分刻み・79日）
     └── images/               検証用の写真を置く場所
 ```
 

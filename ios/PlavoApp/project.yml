@@ -33,6 +33,10 @@ targets:
       - path: ../../server/fixtures/sensors
         buildPhase: resources
         type: folder
+      # 仕込みの株ひまりの一生分の計測値。育成のグラフに使う（D44）
+      - path: ../../server/fixtures/growth
+        buildPhase: resources
+        type: folder
     dependencies:
       - package: PlavoCore
         product: PlavoCore

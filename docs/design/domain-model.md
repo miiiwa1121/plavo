@@ -78,6 +78,63 @@ D23で決めた原則が、このモデル全体を規定する。
 
 今回は1日分のデータセットから読み込む（F-10）。
 
+### 育成のグラフの値（D44）
+
+育成のグラフは、項目を**定義**と**値の列**に分けて持つ。項目を足すときは、定義に1行・データに1列を足すだけで済む。
+
+**定義**（`MetricDefinition`・PlavoCore の `MetricCatalog.swift`）
+
+| 属性 | 内容 |
+|---|---|
+| id | `MetricID`。文字列なので、定義に無い項目もデータから読める |
+| label / unit | 表示名・単位 |
+| interval | 刻み（秒） |
+| source | センサー／画像／計算。計算の項目は元の列から作る関数を持つ |
+| style | 折れ線・点・棒 |
+| fractionDigits | 表示する小数の桁 |
+| fixedDomain | 縦軸を固定するときの範囲（%の項目は 0〜100） |
+| lowLabel / highLabel | 適正範囲を外れたときの言い方 |
+
+適正範囲は定義ではなく**植物のプロファイル**に持つ（`PlantProfile.range(for:)`）。種によって違うため。長い幅でまとめるときは、どの項目も平均を取る。
+
+**値の列**（`MetricSeries`）
+
+| 属性 | 型 | 内容 |
+|---|---|---|
+| start | Date | 最初の点の時刻 |
+| interval | TimeInterval | 刻み |
+| values | [Double?] | **測れなかった点は nil。0で埋めない** |
+
+| 項目 | ID | 刻み | 出どころ |
+|---|---|---|---|
+| 土壌水分 | `soilMoisture` | 10分 | センサー |
+| 気温 | `temperature` | 10分 | センサー |
+| 湿度 | `humidity` | 10分 | センサー |
+| 光量 | `lightLux` | 10分 | センサー |
+| 日長 | `dayLength` | 1日 | 計算（光量が 1,000 lux 以上の時間） |
+| CO2 | `co2` | 10分 | センサー |
+| 土の温度 | `soilTemperature` | 10分 | センサー |
+| EC | `nutrientEc` | 10分 | センサー |
+| pH | `soilPh` | 10分 | センサー |
+| 草丈 | `heightCm` | 1日 | 画像 |
+
+`SensorReading` は導出指標（`Metrics`）の入力としてそのまま残す。**グラフの値の列とは別物**で、項目が決まった一次データとして使う。
+
+**同梱ファイルの形**（`server/fixtures/growth/himari.json`）
+
+```json
+{
+  "series": {
+    "soilMoisture": { "interval": 600,   "offset": 0,     "values": [52.0, 51.9] },
+    "heightCm":     { "interval": 86400, "offset": 43200, "values": [null, 0.8] }
+  }
+}
+```
+
+日付を持たない。値は出会った日の0時から数え、`offset` は0時からずらす秒数。ひまりの出会った日は起動日から逆算で決まるため（L-12）。
+
+**登録した株**は、届いた値を `MetricBucketer` で10分ごとの平均にまとめる。区切りが閉じたときに1点が確定し、選ばれていないあいだに飛んだ区切りは nil になる。
+
 ### DiaryEntry（日記）
 
 | 属性 | 型 | 備考 |
