@@ -38,6 +38,8 @@ final class PlantStore {
     private(set) var seededPlantId: UUID?
     /// 仕込んだ観察の件数。リセットでここまで戻す
     private var seededObservationCount = 0
+    /// 仕込みの仮の写真（D47）。「直近の1枚」（D42）には出さない
+    private var seededPhotoRefs: Set<String> = []
 
     /// 選択中の株。カメラで観察した結果はここに積まれる
     var selectedPlantId: UUID?
@@ -117,6 +119,8 @@ final class PlantStore {
                         dayLabel: "\(day)日目",
                         text: Self.seededText(for: panel),
                         quotedDialogue: panel.lines.first,
+                        photoRefs: seedPhotos(
+                            day: day, stage: reachedStage, thirsty: panel.key == "trueLeaf-thirsty"),
                         author: .auto))
             } else if let ordinary = Self.ordinaryText(day: day) {
                 // 段階の変わり目ではないが、何か書いた日
@@ -127,6 +131,7 @@ final class PlantStore {
                         stage: reachedStage,
                         dayLabel: "\(day)日目",
                         text: ordinary,
+                        photoRefs: seedPhotos(day: day, stage: reachedStage, thirsty: false),
                         author: .user))
             } else {
                 // お休みした日
@@ -141,6 +146,18 @@ final class PlantStore {
             }
         }
         diary.sort { $0.date > $1.date }
+    }
+
+    /// 仮の写真を描いて置き、参照名を返す（D47）。
+    ///
+    /// **何か書いた日にだけ撮ったことにする。**お休みの日は写真も無い
+    private func seedPhotos(day: Int, stage: GrowthStage, thirsty: Bool) -> [String] {
+        (0..<PlaceholderPhotos.shots(onDay: day)).map { shot in
+            let ref = UUID().uuidString
+            images[ref] = PlaceholderPhotos.jpeg(day: day, stage: stage, thirsty: thirsty, shot: shot)
+            seededPhotoRefs.insert(ref)
+            return ref
+        }
     }
 
     /// パネルのキーから生育段階を取る。`trueLeaf-thirsty` のような
@@ -383,8 +400,13 @@ final class PlantStore {
     ///
     /// 日記は新しい順に並び、その日のページの中では撮った順に積まれる。
     /// 写真のあるいちばん新しいページの、いちばん後ろが最後の1枚になる。
+    ///
+    /// **仕込みの仮の写真は含めない**（D47）。含めると、まだ1枚も撮っていないのに
+    /// ひまりの写真が出てしまう（D42 では何も出さない）
     var latestPhotoRef: String? {
-        diary.first { !$0.photoRefs.isEmpty }?.photoRefs.last
+        diary.lazy
+            .flatMap { $0.photoRefs.reversed() }
+            .first { !self.seededPhotoRefs.contains($0) }
     }
 
     /// その株の写真を、新しい順に集める。
@@ -392,10 +414,17 @@ final class PlantStore {
     /// 日記は全体で一つだが、**写真は撮った対象が決まっている。**
     /// 株ごとの振り返りは、日記を絞り込むのではなく写真を集めて見せる（§4.4）。
     /// 日記は「その日に何があったか」、ギャラリーは「この子がどう育ったか」。
-    func photos(of plantId: UUID) -> [(ref: String, date: Date)] {
+    ///
+    /// ページの中の写真は撮った順に積まれているので、**日の中も逆にして**新しい順に揃える。
+    /// 1枚を追う画面は、これをそのまま逆にして時間の流れで並べる（D46）。
+    func photos(of plantId: UUID) -> [PlantPhoto] {
         diary
             .filter { $0.plantId == plantId }
-            .flatMap { entry in entry.photoRefs.map { (ref: $0, date: entry.date) } }
+            .flatMap { entry in
+                entry.photoRefs.reversed().map {
+                    PlantPhoto(ref: $0, date: entry.date, dayLabel: entry.dayLabel)
+                }
+            }
     }
 
     /// 今日のページに株を結びつける。登録より先にページができているため、
@@ -486,6 +515,7 @@ final class PlantStore {
         bucketers.removeAll()
         seededPlantId = nil
         seededObservationCount = 0
+        seededPhotoRefs.removeAll()
         // 未選択に戻す。次の来場者も「はじめまして」から始まる
         selectedPlantId = nil
         if let bank = seedSource, let growthFile = seedGrowth {
@@ -497,4 +527,13 @@ final class PlantStore {
     private var seedSource: DialogueBank?
     private var seedProfile: PlantProfile?
     private var seedGrowth: GrowthRecordFile?
+}
+
+/// ギャラリーに並べる1枚。写真の実体は持たず、どの日のページのものかだけを添える
+struct PlantPhoto: Hashable {
+    let ref: String
+    /// 載っている日記のページの日付
+    let date: Date
+    /// そのページの「何日目」。持たないページもある
+    let dayLabel: String?
 }

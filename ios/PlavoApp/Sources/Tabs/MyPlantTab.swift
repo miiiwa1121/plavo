@@ -20,6 +20,12 @@ struct MyPlantTab: View {
                 }
             }
             .navigationTitle("マイプラント")
+            // **行き先を直接渡す NavigationLink（`NavigationLink { 行き先 }`）は使わない。**
+            // navigationDestination と同じスタックに混ぜると、詳細からギャラリーの1枚へ
+            // 進んだとき、詳細ごと作り直されて「記録」に戻された
+            .navigationDestination(for: UUID.self) { id in
+                PlantDetailView(model: model, plantId: id)
+            }
         }
     }
 
@@ -45,9 +51,7 @@ struct MyPlantTab: View {
     private var list: some View {
         List {
             ForEach(model.store.plants) { plant in
-                NavigationLink {
-                    PlantDetailView(model: model, plantId: plant.id)
-                } label: {
+                NavigationLink(value: plant.id) {
                     row(plant)
                 }
             }
@@ -158,6 +162,11 @@ struct PlantDetailView: View {
     @State private var pickerHeight: CGFloat = 47
     /// ページの中身が、画面の上端からどれだけずれて置かれているか。測って打ち消す
     @State private var pageShift: CGFloat = 0
+    /// ギャラリーで見ている写真。1枚を追う画面・全画面と共有する（D46）。
+    /// 戻るとき、この写真のマスへ縮めるため
+    @State private var galleryFocus = ""
+    @State private var showGalleryStrip = false
+    @Namespace private var galleryZoom
     @Environment(\.dismiss) private var dismiss
 
     private var plant: Plant? { model.store.plant(plantId) }
@@ -217,6 +226,17 @@ struct PlantDetailView: View {
         .background(Color(uiColor: .systemGroupedBackground))
         .navigationTitle(plant?.name ?? "")
         .navigationBarTitleDisplayMode(.inline)
+        // **ギャラリーのページの中ではなく、ここに置く。**
+        // ページ形式の TabView の中に置くと「lazy なコンテナの中」として無視され、
+        // グリッドの写真をタップしても移らなかった
+        .navigationDestination(isPresented: $showGalleryStrip) {
+            // グリッドは新しい順。1枚を追う画面は時間の流れで並べる（D46）
+            GalleryStripView(
+                photos: model.store.photos(of: plantId).reversed(), current: $galleryFocus, model: model
+            )
+            // マスから拡大して開き、戻るときは**そのとき見ている写真の**マスへ縮む（D46-a）
+            .navigationTransition(.zoom(sourceID: galleryFocus, in: galleryZoom))
+        }
         .onChange(of: avatarItem) { _, item in
             guard let item else { return }
             Task {
@@ -393,21 +413,29 @@ struct PlantDetailView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
-            ScrollView {
-                LazyVGrid(
-                    columns: Array(repeating: GridItem(.flexible(), spacing: 2), count: 3),
-                    spacing: 2
-                ) {
-                    ForEach(photos, id: \.ref) { photo in
-                        NavigationLink(value: photo.ref) {
-                            GalleryTile(ref: photo.ref, date: photo.date, model: model)
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVGrid(
+                        columns: Array(repeating: GridItem(.flexible(), spacing: 2), count: 3),
+                        spacing: 2
+                    ) {
+                        ForEach(photos, id: \.ref) { photo in
+                            // 見ている写真を先に決めてから開く。拡大の起点をそのマスにするため
+                            Button {
+                                galleryFocus = photo.ref
+                                showGalleryStrip = true
+                            } label: {
+                                GalleryTile(ref: photo.ref, date: photo.date, model: model)
+                            }
+                            .buttonStyle(.plain)
+                            .matchedTransitionSource(id: photo.ref, in: galleryZoom)
+                            .id(photo.ref)
                         }
-                        .buttonStyle(.plain)
                     }
                 }
-            }
-            .navigationDestination(for: String.self) { ref in
-                PhotoViewer(refs: photos.map(\.ref), startRef: ref, model: model)
+                // 先の画面で写真を変えたら、戻る先のマスが見える位置まで送っておく。
+                // 見えていないマスには縮んで戻れない
+                .onChange(of: galleryFocus) { _, ref in proxy.scrollTo(ref) }
             }
         }
     }
@@ -447,33 +475,5 @@ private struct GalleryTile: View {
             }
             .clipped()
             .contentShape(Rectangle())
-    }
-}
-
-/// 写真を大きく見る。左右にスライドして前後へ
-private struct PhotoViewer: View {
-    let refs: [String]
-    let startRef: String
-    let model: AppModel
-
-    @State private var current: String = ""
-
-    var body: some View {
-        TabView(selection: $current) {
-            ForEach(refs, id: \.self) { ref in
-                Group {
-                    if let data = model.store.image(ref), let image = UIImage(data: data) {
-                        Image(uiImage: image).resizable().scaledToFit()
-                    } else {
-                        Color.black
-                    }
-                }
-                .tag(ref)
-            }
-        }
-        .tabViewStyle(.page)
-        .background(Color.black.ignoresSafeArea())
-        .navigationBarTitleDisplayMode(.inline)
-        .onAppear { current = startRef }
     }
 }
