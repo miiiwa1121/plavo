@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// マイページ（D13 / D20）。
+/// プロフィール（D13 / D20）。
 ///
 /// 将来はクローズドSNSのプロフィールになるが、今回はアカウントを作らない（D21）。
 /// 展示ではリセット操作の置き場としても使う（L-13）。
@@ -64,7 +64,7 @@ struct MyPageTab: View {
                     }
                 }
             }
-            .navigationTitle("マイページ")
+            .navigationTitle("プロフィール")
             .confirmationDialog(
                 "リセットしますか", isPresented: $showResetConfirm, titleVisibility: .visible
             ) {

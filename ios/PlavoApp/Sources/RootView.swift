@@ -36,7 +36,7 @@ struct RootView: View {
             Tab("ルーム", systemImage: "square.grid.2x2", value: 3) {
                 RoomTab()
             }
-            Tab("マイページ", systemImage: "person", value: 4) {
+            Tab("プロフィール", systemImage: "person", value: 4) {
                 MyPageTab(model: model)
             }
         }

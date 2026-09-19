@@ -481,7 +481,7 @@ final class PlantStore {
         Metrics.currentStage(observations(of: plantId))
     }
 
-    // MARK: - 統計（マイページ）
+    // MARK: - 統計（プロフィール）
 
     /// 育てている植物。枯れたものは数えない
     var livingCount: Int {
