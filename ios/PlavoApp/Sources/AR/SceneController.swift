@@ -28,9 +28,31 @@ final class SceneController: NSObject {
     }
 
     private(set) var subject: Subject = .none
-    /// 吹き出しを出す画面上の位置。ワールド座標を毎フレーム投影して求める
+    /// 吹き出し本体の中心（画面座標）。空間の点を毎フレーム投影して求める
     private(set) var bubbleScreenPoint: CGPoint?
+    /// しっぽが指す先（画面座標）。葉の塊の中ほど（D50）
+    private(set) var plantScreenPoint: CGPoint?
+    /// 距離から決まる倍率（D50-a）
+    private(set) var bubbleScale: CGFloat = 1
+    /// いまの象限。診断表示に使う
+    private(set) var placementLabel = "—"
     private(set) var anchorDistance: Float = 1.2
+
+    /// 吹き出し本体の実寸（倍率を掛ける前）。セリフの長さで変わる。
+    ///
+    /// **置き場所（D50）と倍率（D50-a）の両方に要る。**描いてから測るのでは
+    /// 順番が回らないので、セリフを持っている側から渡してもらう
+    var bubbleLayoutSize: CGSize = .zero {
+        didSet {
+            guard bubbleLayoutSize != oldValue else { return }
+            // セリフが変わる場面では吹き出しが出直すので、倍率も跳ばしてよい
+            updateTargetScale()
+            bubbleScale = targetScale
+            // 大きさが変われば良い置き場所も変わる。**動かさずに置き直す。**
+            // セリフが変わる場面なので、吹き出しはどのみち出直す
+            if plantWorld != nil { pinBubble(animated: false) }
+        }
+    }
     private(set) var referenceImageCount = 0
 
     /// 検出を試みる間隔。毎フレームは走らせない（D4-a）。
@@ -133,18 +155,146 @@ final class SceneController: NSObject {
     /// 診断表示で実際のスコアを見ながら調整する
     var plantScoreThreshold: Float = 0.10
 
-    /// 被写体が小さすぎるものは無視する。画面に占める面積の下限
-    private let minSubjectArea: CGFloat = 0.03
+    /// 画面に占める面積の下限。**ここは雑音よけでしかない**（D51 改訂）。
+    ///
+    /// 一度 0.12 まで上げたが、**株に限りなく近づかないと出なくなった。**
+    /// 「しっかりとらえた」を面積で測るのをやめ、**株の全体が画面に入っているか**で
+    /// 見るようにした。面積は、豆粒のような塊を拾わないための床として残す
+    var minSubjectArea: CGFloat = 0.04
 
-    /// 画面座標の平滑化の強さ（0に近いほど強く効く）。
-    /// ARKit の姿勢推定は微細に揺れており、毎フレーム素直に投影すると
-    /// 吹き出しがぶれて見える
-    private let smoothing: CGFloat = 0.25
-    private var smoothedPoint: CGPoint?
+    /// 条件を満たす検出が続いている起点。**1秒続いたら検知成立**（D51）
+    private var candidateSince: TimeInterval?
+    /// 検知が成立するまでの間。株を捉えてからこれだけ待つ。
+    ///
+    /// **実際に出るまでの時間は、検出の間隔（探している間は0.4〜0.6秒）に律速される。**
+    /// ここを間隔より短くすると、実質「次の検出でも条件を満たすこと」になる
+    private let confirmDelay: TimeInterval = 0.3
+    /// 直近の被写体が画面に占めた面積。しきい値の調整に使う
+    private(set) var lastSubjectArea: CGFloat = 0
+    /// 直近の枠が画面で切れていたか。「全体を捉えた」の確認に使う
+    private(set) var lastFraming = "—"
+    /// 直近の検出が、どの条件で落ちたか。**実機で詰めるために出す**
+    private(set) var lastRejection = "—"
+
+    /// 「全体を捉えた」の厳しさ（D51）。**実機で切り替えて確かめる。**
+    enum FramingRule: String, CaseIterable {
+        /// 四辺とも切れていないこと
+        case whole
+        /// **切れているのは1辺まで。既定。**
+        /// 鉢の足元や、葉先が1枚画面の端に届いた程度では落とさない
+        case oneEdge
+        /// 問わない
+        case any
+
+        var label: String {
+            switch self {
+            case .whole: "全体"
+            case .oneEdge: "1辺可"
+            case .any: "問わない"
+            }
+        }
+
+        func accepts(clippedEdges count: Int) -> Bool {
+            switch self {
+            case .whole: count == 0
+            case .oneEdge: count <= 1
+            case .any: true
+            }
+        }
+    }
+
+    var framingRule: FramingRule = .oneEdge
+
+    /// 取りこぼしの連続回数。**1回では取り消さない**（D51 改訂）。
+    ///
+    /// マスクは毎回きれいに取れるわけではない。1回の失敗で取り消すと、
+    /// **成立には「間隔ぶん空けた検出を2回連続で完璧に通す」ことが要り、**
+    /// マスクが半分の確率で安定するだけで数秒〜十数秒かかっていた
+    private var missStreak = 0
+    /// これを超えて続けて外したら取り消す
+    private let allowedMisses = 1
+
+    /// 探しているあいだの検出の間隔の上限。
+    ///
+    /// 通常は処理時間の3倍まで空けて描画を守るが、**探している間は吹き出しが
+    /// 出ていないので、守るべき追従が無い。**詰めて samples を増やす
+    private let huntInterval: TimeInterval = 0.6
+
+    /// 画面座標の震えを取る（D49）。
+    ///
+    /// ARKit の姿勢推定は静止していても微細に揺れており、毎フレーム素直に
+    /// 投影すると吹き出しがぶれる。**一定の係数で均すやり方（前の値へ
+    /// 0.25 ずつ寄せていた）では解けない。**震えを消すほど追従が遅れ、
+    /// 追従を上げるほど震えが残る。どちらか片方しか取れない。
+    ///
+    /// 1€ フィルタは、**動きの速さから均しの強さを毎フレーム決める。**
+    /// 止まっているあいだだけ強く均し、向けた先を変えたときは素直に追う。
+    private var plantFilter = PointFilter()
+    private var bubbleFilter = PointFilter()
+    /// 直前に投影した時刻。フィルタは経過時間で強さを決める
+    private var lastProjectedAt: TimeInterval?
+
+    /// 距離の平滑化の途中の値。生のまま配ると大きさが毎フレーム変わり、
+    /// 風船が呼吸しているように見える
+    private var smoothedDistance: Float?
+
+    /// 相手が決まっているあいだ、打った点を測り直す間隔（D49）。
+    /// 探すときより空ける。位置を直すだけなので、頻度は要らない
+    private let refineInterval: TimeInterval = 1.2
+    /// 測り直した結果を、どれだけ受け取るか。1回で飛びつかない
+    private let refineBlend: Float = 0.25
+    /// これより離れた結果は、別のものを拾ったと見なして捨てる（m）
+    private let maxRefineDistance: Float = 0.5
+
+    // MARK: - 置き場所（D50 / D50-a）
+
+    /// **株の見かけの大きさに対する、1行ぶんの本体の高さの比**（D50-a 改訂）。
+    ///
+    /// 理想の見本を測った値。距離ではなく株に繋ぐのが要点で、
+    /// **小さい株ほど近くで見る**ため、距離に繋ぐと小さい株ほど吹き出しが大きくなる。
+    /// 株の見かけ自体が距離に反比例するので、「遠ざければ小さく」はそのまま成り立つ。
+    ///
+    /// **実機で合わせ直す前提。**見本で測ったのは葉のかたまりだが、検出が返す枠は
+    /// 前景マスクなので鉢まで含む可能性が高く、そのぶん枠が縦に伸びる
+    var plantSizeRatio: CGFloat = 0.25
+    /// 遠いほうの下限。これ以下は点にしか見えない
+    private let minBubbleScale: CGFloat = 0.3
+    /// 近いほうは、本体の幅が画面のこの割合になったら止める
+    private let maxBubbleWidthRatio: CGFloat = 0.85
+
+    /// 倍率の目標値。**毎フレーム、ここへ少しずつ寄せる**
+    private var targetScale: CGFloat = 1
+    /// 目標へ寄る速さ（時定数・秒）
+    private let scaleSmoothing: TimeInterval = 0.2
+
+    /// 置き直してよくなるまでの間。続けて動かさない
+    private let repinCooldown: TimeInterval = 4.0
+    /// ずれた状態がこれだけ続いたら置き直す
+    private let badDwell: TimeInterval = 1.5
+    /// 置き場所を見直す間隔。毎フレーム見る必要はない
+    private let evaluateInterval: TimeInterval = 0.3
+    /// **株に対して**どれだけずれたら置き直すか（本体の大きさに対する割合）
+    private let driftTolerance: CGFloat = 0.5
+
+    /// 株の見かけの枠を「1mのときの大きさ」に直して覚える。
+    ///
+    /// 距離で割れば、いまの画面での枠になる。**距離に依らない形で持つので、
+    /// 測り直したときに前の値と混ぜられる。**そのまま持つと、1.2秒ごとの
+    /// 測り直しで枠が跳ね、倍率と置き場所の判定が揺れる
+    private var plantUnitSize: CGSize?
+    private var quadrant: BubblePlacement.Quadrant?
+    private var badSince: TimeInterval?
+    private var lastPinAt: TimeInterval = 0
+    private var lastEvaluatedAt: TimeInterval = 0
 
     private weak var arView: ARView?
     private var model: AppModel?
-    private var worldPosition: SIMD3<Float>?
+    /// 葉の塊の中ほど。しっぽが指す先
+    private var plantWorld: SIMD3<Float>?
+    /// 本体の置き場所。株から斜めにずらした点。**これも空間に固定する**
+    private var bubbleWorld: SIMD3<Float>?
+    /// 置き直しの移り先。着いたら nil に戻る
+    private var bubbleTargetWorld: SIMD3<Float>?
     /// 再開のために覚えておく。作り直すとトラッキングが初期化されてしまう
     private var configuration: ARWorldTrackingConfiguration?
 
@@ -305,8 +455,8 @@ final class SceneController: NSObject {
         arView?.session.pause()
         isRunning = false
         subject = .none
-        worldPosition = nil
-        bubbleScreenPoint = nil
+        plantWorld = nil
+        resetTracking()
     }
 
     /// 映像形式を変えたときなど、セッションを張り直す
@@ -326,7 +476,7 @@ final class SceneController: NSObject {
     /// 理由に断らない（原則3）。
     func adoptPlant(atNormalizedBox box: CGRect?) {
         isDetectionSuspended = false
-        smoothedPoint = nil
+        resetTracking()
         placeAnchor(forNormalizedBox: box ?? CGRect(x: 0.3, y: 0.25, width: 0.4, height: 0.5))
         subject = .plant
     }
@@ -334,9 +484,10 @@ final class SceneController: NSObject {
     /// アンカーを捨てて、もう一度検出からやり直す。検証で繰り返し試すときに使う
     func redetect() {
         subject = .none
-        worldPosition = nil
-        bubbleScreenPoint = nil
-        smoothedPoint = nil
+        plantWorld = nil
+        resetTracking()
+        candidateSince = nil
+        missStreak = 0
         lastDetectionAt = 0
         detectionAttempts = 0
         detectionHits = 0
@@ -353,13 +504,35 @@ final class SceneController: NSObject {
         let up = SIMD3<Float>(t.columns.1.x, t.columns.1.y, t.columns.1.z)
         let toward = SIMD3<Float>(t.columns.2.x, t.columns.2.y, t.columns.2.z)
         let height = Float(imageAnchor.referenceImage.physicalSize.height)
-        worldPosition = t.translation + up * (height * 0.6) + toward * 0.08
+        plantWorld = t.translation + up * (height * 0.6) + toward * 0.08
+        rememberPanelBox(imageAnchor)
 
         guard case .panel(let current, _) = subject, current == name else {
             let caption = model?.bank?.panel(name).map { "\($0.dayLabel)・\($0.label)" } ?? name
             subject = .panel(key: name, caption: caption)
             return
         }
+    }
+
+    /// パネルの見かけの枠。参照画像の実寸を投影して測る。
+    /// 置き場所の計算（D50）は、株でもパネルでも同じ規則で動く
+    private func rememberPanelBox(_ anchor: ARImageAnchor) {
+        guard let arView, let plant = plantWorld else { return }
+        let t = anchor.transform
+        let right = SIMD3<Float>(t.columns.0.x, t.columns.0.y, t.columns.0.z)
+        let up = SIMD3<Float>(t.columns.1.x, t.columns.1.y, t.columns.1.z)
+        let halfWidth = Float(anchor.referenceImage.physicalSize.width) / 2
+        let halfHeight = Float(anchor.referenceImage.physicalSize.height) / 2
+        guard let center = arView.project(plant),
+            let edgeX = arView.project(plant + right * halfWidth),
+            let edgeY = arView.project(plant + up * halfHeight)
+        else { return }
+        guard let camera = arView.session.currentFrame?.camera else { return }
+        let distance = simd_length(plant - camera.transform.translation)
+        plantUnitSize = CGSize(
+            width: abs(edgeX.x - center.x) * 2 * CGFloat(distance),
+            height: abs(edgeY.y - center.y) * 2 * CGFloat(distance))
+        updateTargetScale()
     }
 
     // MARK: - 植物の検出
@@ -402,15 +575,40 @@ final class SceneController: NSObject {
                 self.topLabels = outcome.labels
                 self.plantScore = outcome.plantScore
 
-                guard case .none = self.subject else { return }
+                self.lastSubjectArea = (outcome.box?.width ?? 0) * (outcome.box?.height ?? 0)
+                let clipped = outcome.box.map { Self.clippedEdges(of: $0) }
+                self.lastFraming = clipped.map { $0.isEmpty ? "全体" : "切れ:" + $0.joined() }
+                    ?? "枠なし"
+
                 // 植物と判定できないものにはアンカーを打たない。
                 // 前景マスクは「主要被写体」を返すだけで、それが植物かは見ていない。
-                guard outcome.plantScore >= threshold else { return }
-                guard let box = outcome.box, box.width * box.height >= minArea else { return }
+                let enough = outcome.box.map { $0.width * $0.height >= minArea } == true
+                let framed = clipped.map { self.framingRule.accepts(clippedEdges: $0.count) }
+                    ?? false
 
-                self.detectionHits += 1
-                self.placeAnchor(forNormalizedBox: box)
-                self.subject = .plant
+                // **どの条件で落ちたかを出す。**推測ではなく実測で詰められるように
+                var missed: [String] = []
+                if outcome.plantScore < threshold { missed.append("らしさ") }
+                if !enough { missed.append("面積") }
+                if !framed { missed.append("収まり") }
+                self.lastRejection = missed.isEmpty ? "通過" : missed.joined(separator: "・")
+
+                guard missed.isEmpty, let box = outcome.box else {
+                    // **1回では取り消さない。**続けて外したときだけ捨てる
+                    if case .none = self.subject { self.registerMiss() }
+                    return
+                }
+                self.missStreak = 0
+
+                switch self.subject {
+                case .none:
+                    self.detectionHits += 1
+                    self.confirmCandidate(box)
+                case .plant:
+                    self.refineAnchor(forNormalizedBox: box)
+                case .panel:
+                    break
+                }
             }
         }
     }
@@ -564,11 +762,301 @@ final class SceneController: NSObject {
             height: CGFloat(maxY - minY) / CGFloat(height))
     }
 
+    /// 枠が画面のどの辺で切れているか（D51 改訂）。
+    ///
+    /// **「株の全体を捉えたか」をこれで見る。**マスクの枠は画面で切られるので、
+    /// 辺に貼り付いていれば、そこから外へ続いていると分かる。
+    ///
+    /// **面積では測らない。**面積で測ると「どれだけ大きく写っているか」の話になり、
+    /// 株に近づかないと成立しなくなる。**遠くても、全体が入っていればそれでよい。**
+    nonisolated private static func clippedEdges(of box: CGRect) -> [String] {
+        let margin: CGFloat = 0.01
+        var edges: [String] = []
+        if box.minX <= margin { edges.append("左") }
+        if box.maxX >= 1 - margin { edges.append("右") }
+        if box.minY <= margin { edges.append("上") }
+        if box.maxY >= 1 - margin { edges.append("下") }
+        return edges
+    }
+
+    /// 条件を満たす検出を積み、1秒続いたら検知を成立させる（D51）。
+    ///
+    /// **最初に条件を満たした時点でアンカーは打つ。ただし見せない。**
+    /// 待っている1秒のあいだに寄せ直しが効くので、**出た瞬間から正しい位置に居られる。**
+    private func confirmCandidate(_ box: CGRect) {
+        let now = CACurrentMediaTime()
+        guard let since = candidateSince else {
+            candidateSince = now
+            missStreak = 0
+            placeAnchor(forNormalizedBox: box)
+            return
+        }
+        refineAnchor(forNormalizedBox: box)
+        guard now - since >= confirmDelay else { return }
+        candidateSince = nil
+        subject = .plant
+    }
+
+    /// 取りこぼしを数える。続けて外したときだけ捨てる（D51 改訂）
+    private func registerMiss() {
+        guard candidateSince != nil else { return }
+        missStreak += 1
+        guard missStreak > allowedMisses else { return }
+        cancelCandidate()
+    }
+
+    /// 育てかけの検知を捨てる。打ったアンカーも一緒に捨てる
+    private func cancelCandidate() {
+        guard candidateSince != nil else { return }
+        candidateSince = nil
+        missStreak = 0
+        plantWorld = nil
+        resetTracking()
+    }
+
     private func placeAnchor(forNormalizedBox box: CGRect) {
         guard let arView else { return }
-        // 吹き出しは植物の少し上に出す
-        let point = CGPoint(x: box.midX * arView.bounds.width, y: box.minY * arView.bounds.height)
-        worldPosition = resolveWorldPosition(at: point, in: arView)
+        let point = anchorPoint(forNormalizedBox: box, in: arView)
+        plantWorld = resolveWorldPosition(at: point, in: arView)
+        rememberPlantBox(box, in: arView)
+        pinBubble(animated: false)
+    }
+
+    /// しっぽが指す先。**葉の塊の中ほど**（D50）。
+    /// 枠の角や上端を指すと、何を指しているのか読み取れない
+    private func anchorPoint(forNormalizedBox box: CGRect, in view: ARView) -> CGPoint {
+        CGPoint(x: box.midX * view.bounds.width, y: box.midY * view.bounds.height)
+    }
+
+    /// 株の見かけの大きさを「1mのときの大きさ」に直して覚える。
+    ///
+    /// **測り直すたびに少しずつ寄せる。**そのまま入れ替えると、1.2秒ごとに
+    /// 倍率と置き場所の基準が跳ねる
+    private func rememberPlantBox(_ box: CGRect, in view: ARView) {
+        guard let camera = view.session.currentFrame?.camera, let plant = plantWorld else { return }
+        let distance = simd_length(plant - camera.transform.translation)
+        // 初回は平滑化の受け皿が空なので、ここで埋めておく
+        if smoothedDistance == nil {
+            smoothedDistance = distance
+            anchorDistance = distance
+        }
+        let measured = CGSize(
+            width: box.width * view.bounds.width * CGFloat(distance),
+            height: box.height * view.bounds.height * CGFloat(distance))
+        if let previous = plantUnitSize {
+            // **控えめに混ぜる。**株の実際の大きさは変わらないので、測り直しは
+            // 雑音の訂正でしかない。強く混ぜるとそのたびに大きさが跳ねる
+            let blend: CGFloat = 0.15
+            plantUnitSize = CGSize(
+                width: previous.width + (measured.width - previous.width) * blend,
+                height: previous.height + (measured.height - previous.height) * blend)
+            updateTargetScale()
+        } else {
+            plantUnitSize = measured
+            updateTargetScale()
+            // 初めて測ったときだけ跳ばす。寄せていくと、出た直後に膨らんで見える
+            bubbleScale = targetScale
+        }
+    }
+
+    /// 打った点を、いま見えている株へ少しずつ寄せる（D49）。
+    ///
+    /// **効くのは、奥行きを外したときの取り返し。**1.2m のつもりで打った点が
+    /// 本当は 0.5m のところにあると、端末がわずかに動いただけで**見かけの
+    /// 位置が大きくずれる。**手ぶれで吹き出しが泳いで見える原因は、
+    /// 姿勢推定の震えよりこの視差のほうが大きい。測り直して寄せれば、
+    /// 奥行きが取れた回だけ正しい位置に近づく。
+    ///
+    /// **飛びつかない。**1回の結果をそのまま採ると、隣の鉢や通りがかりの
+    /// 人を拾った拍子に吹き出しが持って行かれる。遠い結果は捨て、
+    /// 近い結果も少しずつ混ぜる。
+    private func refineAnchor(forNormalizedBox box: CGRect) {
+        guard let arView, let current = plantWorld else { return }
+        let point = anchorPoint(forNormalizedBox: box, in: arView)
+
+        let measured: SIMD3<Float>
+        if let hit = arView.raycast(from: point, allowing: .estimatedPlane, alignment: .any).first {
+            depthFromRaycast = true
+            measured = hit.worldTransform.translation
+        } else if let ray = arView.ray(through: point) {
+            // 奥行きが取れなかったときは、**向きだけ直して距離は変えない。**
+            // ここで固定距離に落とすと、当たっていた奥行きを毎回押し戻す
+            depthFromRaycast = false
+            let distance = simd_length(current - ray.origin)
+            measured = ray.origin + simd_normalize(ray.direction) * distance
+        } else {
+            return
+        }
+
+        guard simd_length(measured - current) <= maxRefineDistance else { return }
+        plantWorld = current + (measured - current) * refineBlend
+        rememberPlantBox(box, in: arView)
+    }
+
+    // MARK: - 置き場所（D50）
+
+    /// 象限を選ぶときだけ見る範囲。画面から余白を引き、
+    /// **下端はシャッターと弧のぶんを大きく空ける。**
+    ///
+    /// **置き場所を収める枠ではない。**収めてしまうと、株に対する位置が
+    /// 画面の都合で変わり、端末を振るたびに吹き出しが画面へ戻ってくる
+    private var placementField: CGRect {
+        guard let arView else { return .zero }
+        return arView.bounds.inset(
+            by: UIEdgeInsets(top: 72, left: 16, bottom: 168, right: 16))
+    }
+
+    /// いまの画面での株の枠。覚えた「1mのときの大きさ」を距離で割る
+    private var plantScreenBox: CGRect? {
+        guard let unit = plantUnitSize, let center = plantScreenPoint, liveDistance > 0
+        else { return nil }
+        let width = unit.width / CGFloat(liveDistance)
+        let height = unit.height / CGFloat(liveDistance)
+        return CGRect(
+            x: center.x - width / 2, y: center.y - height / 2, width: width, height: height)
+    }
+
+    /// 株の見かけの大きさ。**幅と高さの平均**を使う。
+    /// 高さだけだと横に広がった株で、幅だけだと背の高い一本茶で吹き出しが小さくなる
+    private var plantSpan: CGFloat? {
+        guard let unit = plantUnitSize, liveDistance > 0 else { return nil }
+        return (unit.width + unit.height) / 2 / CGFloat(liveDistance)
+    }
+
+    /// 平滑化した距離。**配っている `anchorDistance` は 0.02m 刻みで段になっている**ので、
+    /// 大きさと置き場所の計算にはこちらを使う
+    private var liveDistance: Float { smoothedDistance ?? anchorDistance }
+
+    /// 本体の置き場所を決め、**空間に焼き付ける**（D50）。
+    ///
+    /// 画面座標で決めてよいのは、ここが打つ瞬間の1回きりだから。
+    /// 焼き付けたあとは動かないので、「画面に追従している」ことにはならない。
+    private func pinBubble(animated: Bool) {
+        guard let arView, bubbleLayoutSize.width > 0, let box = plantScreenBox else { return }
+        let rendered = CGSize(
+            width: bubbleLayoutSize.width * bubbleScale,
+            height: bubbleLayoutSize.height * bubbleScale)
+        let choice = BubblePlacement.best(
+            plant: box, size: rendered, in: placementField, current: quadrant)
+        quadrant = choice.quadrant
+        placementLabel = choice.quadrant.label
+
+        // **奥行きは株と同じにする。**手前や奥に置くと、株と一緒に大きさが変わらない
+        guard let ray = arView.ray(through: choice.center) else { return }
+        let target = ray.origin + simd_normalize(ray.direction) * anchorDistance
+        if animated, bubbleWorld != nil {
+            bubbleTargetWorld = target
+        } else {
+            bubbleWorld = target
+            bubbleTargetWorld = nil
+            bubbleFilter.reset()
+        }
+        lastPinAt = CACurrentMediaTime()
+        badSince = nil
+    }
+
+    /// 置き直しの途中なら、本体の点を目標へ寄せる（D50）。
+    ///
+    /// **消して出し直さない。**セリフを読んでいる途中で途切れる。
+    /// 移っているあいだだけ空間固定が崩れるが、1回が0.5秒ほどで終わる
+    private func advanceBubbleMove(dt: TimeInterval) {
+        guard let target = bubbleTargetWorld, let current = bubbleWorld else { return }
+        let delta = target - current
+        guard simd_length(delta) > 0.002 else {
+            bubbleWorld = target
+            bubbleTargetWorld = nil
+            return
+        }
+        bubbleWorld = current + delta * Float(1 - exp(-dt / 0.18))
+    }
+
+    /// **株に対して**位置がずれていないかを見て、ずれていれば置き直す（D50）。
+    ///
+    /// ## 画面は見ない
+    ///
+    /// 「画面から出そうか」で判定してはいけない。端末を振れば吹き出しは
+    /// 画面の端へ寄るので、**振るたびに打ち直して画面へ戻る**ことになる。
+    /// それは空間に固定されているとは言わない。
+    ///
+    /// **カメラを株から外せば見えなくなってよい。**大事なのは、株に向けたときに
+    /// 株に対して適切な位置にあること。
+    ///
+    /// ## 何がずれるのか
+    ///
+    /// 本体の点は打った瞬間の3D位置に固定されるが、次の2つでずれていく。
+    ///
+    ///   - **株の点が直り続ける**（D49 の寄せ直し）。本体は置いたままなので、
+    ///     2点の関係が少しずつ変わる
+    ///   - **株の周りを回り込む。**ずらした向きは打った時点のカメラ基準なので、
+    ///     角度が変わると、斜めに置いたはずの吹き出しが株の真上や裏に見える
+    ///
+    /// どちらも「いま見えている株の枠から計算した、あるべき位置」との差に出る。
+    private func evaluatePlacement() {
+        guard subject != .none, bubbleLayoutSize.width > 0, let quadrant,
+            let center = bubbleScreenPoint, let box = plantScreenBox
+        else { return }
+        let now = CACurrentMediaTime()
+        guard now - lastEvaluatedAt >= evaluateInterval else { return }
+        lastEvaluatedAt = now
+        guard now - lastPinAt >= repinCooldown else { return }
+
+        let rendered = CGSize(
+            width: bubbleLayoutSize.width * bubbleScale,
+            height: bubbleLayoutSize.height * bubbleScale)
+
+        //   ① あるべき位置から離れた  ② 株に被った
+        let ideal = BubblePlacement.center(for: quadrant, plant: box, size: rendered)
+        let drift = hypot(center.x - ideal.x, center.y - ideal.y)
+        let rect = CGRect(
+            x: center.x - rendered.width / 2, y: center.y - rendered.height / 2,
+            width: rendered.width, height: rendered.height)
+        let hidden = rect.intersection(box).area / max(1, box.area)
+        let bad = drift > max(rendered.width, rendered.height) * driftTolerance || hidden > 0.35
+
+        guard bad else {
+            badSince = nil
+            return
+        }
+        guard let since = badSince else {
+            badSince = now
+            return
+        }
+        guard now - since >= badDwell else { return }
+        pinBubble(animated: true)
+    }
+
+    /// 倍率を**株の見かけの大きさ**から決める（D50-a 改訂）。
+    ///
+    /// 距離ではなく株に繋ぐ。**小さい株ほど近くで見る**ので、距離に繋ぐと
+    /// 小さい株ほど吹き出しが大きくなっていた。株の見かけ自体が距離に反比例するため、
+    /// 「遠ざければ小さく」はこの式のまま成り立つ。
+    ///
+    /// **基準は1行ぶんの本体の高さ。**本体そのものの高さに合わせると、
+    /// 2行のセリフだけ文字が小さくなる。
+    ///
+    /// **遠くで読めなくなるのは、そのままにする。**読めないこと自体が
+    /// 「近づいてみて」という誘いになる
+    private func updateTargetScale() {
+        guard bubbleLayoutSize.width > 0, let span = plantSpan else { return }
+        var scale = span * plantSizeRatio / BubbleMetrics.singleLineHeight
+        if let arView {
+            // 近いほうは**本体の幅**で止める。倍率で止めると長いセリフだけ画面から切れる
+            let cap = arView.bounds.width * maxBubbleWidthRatio / bubbleLayoutSize.width
+            scale = min(scale, cap)
+        }
+        targetScale = max(minBubbleScale, scale)
+    }
+
+    /// 目標の倍率へ、毎フレーム少しずつ寄せる。
+    ///
+    /// **入口の値はどうしても段になる。**株の枠は1.2秒ごとにしか測り直さないし、
+    /// 距離も平滑化の途中の値でしかない。**その段をここで飲み込む。**
+    /// 目標を直に配ると、近づいたり離れたりするたびに大きさがカクつく
+    private func advanceScale(dt: TimeInterval) {
+        let step = CGFloat(1 - exp(-dt / scaleSmoothing))
+        let next = bubbleScale + (targetScale - bubbleScale) * step
+        // 落ち着いたら止める。目標に着いてからも配り続ける理由がない
+        if abs(next - bubbleScale) >= 0.001 { bubbleScale = next }
     }
 
     /// 奥行きを決める（D3-a）。
@@ -579,6 +1067,13 @@ final class SceneController: NSObject {
             return hit.worldTransform.translation
         }
         depthFromRaycast = false
+        // **その点を通る視線の上に置く。**以前はカメラの正面方向へ置いており、
+        // レイキャストが外れた株は、画面のどこに写っていても画面の中央に
+        // 打たれていた。植物は平面検出が効かない被写体で外れる回が多く、
+        // 吹き出しが株から離れて見える一番の原因になっていた（D49）
+        if let ray = view.ray(through: point) {
+            return ray.origin + simd_normalize(ray.direction) * fallbackDistance
+        }
         guard let camera = view.session.currentFrame?.camera else {
             return SIMD3<Float>(0, 0, -fallbackDistance)
         }
@@ -609,14 +1104,22 @@ extension SceneController: ARSessionDelegate {
         Task { @MainActor in
             self.updateDiagnostics(frame)
             self.project(frame)
-            guard case .none = self.subject, !self.isDetectionSuspended,
-                self.canDetectPlant
-            else { return }
+            guard !self.isDetectionSuspended, self.canDetectPlant else { return }
             // トラッキングが安定するまで検出しない。
             // 初期化中に打ったアンカーは位置が信用できず、吹き出しが飛ぶ原因になる。
             guard case .normal = frame.camera.trackingState else { return }
+
+            // **相手が決まったあとも走らせる。**探すためではなく、
+            // 打った点を見えている株へ寄せ直すため（D49）。間隔は空ける
+            let interval: TimeInterval
+            switch self.subject {
+            case .none: interval = min(self.detectionInterval, self.huntInterval)
+            case .plant: interval = max(self.refineInterval, self.detectionInterval)
+            // パネルは画像アンカーが位置を持っている。こちらで直す余地がない
+            case .panel: return
+            }
             let now = frame.timestamp
-            guard now - self.lastDetectionAt >= self.detectionInterval else { return }
+            guard now - self.lastDetectionAt >= interval else { return }
             self.lastDetectionAt = now
             self.detectPlant(in: frame)
         }
@@ -657,33 +1160,152 @@ extension SceneController: ARSessionDelegate {
     /// これにより吹き出しは空間に留まったまま、端末を動かすと画面上を移動する。
     /// 画面外に出れば消え、戻せば同じ場所に現れる（D3）。
     private func project(_ frame: ARFrame) {
-        guard let arView, let world = worldPosition else {
-            bubbleScreenPoint = nil
+        guard let arView, let plant = plantWorld else {
+            resetTracking()
             return
         }
-        let cameraPos = frame.camera.transform.translation
-        let toAnchor = world - cameraPos
+        let camera = frame.camera.transform
+        let toPlant = plant - camera.translation
         let forward = -SIMD3<Float>(
-            frame.camera.transform.columns.2.x,
-            frame.camera.transform.columns.2.y,
-            frame.camera.transform.columns.2.z)
+            camera.columns.2.x, camera.columns.2.y, camera.columns.2.z)
         // 背面に回り込んだら出さない
-        guard simd_dot(toAnchor, forward) > 0, let projected = arView.project(world) else {
-            bubbleScreenPoint = nil
-            smoothedPoint = nil
+        guard simd_dot(toPlant, forward) > 0, let plantProjected = arView.project(plant) else {
+            resetTracking()
             return
         }
-        anchorDistance = simd_length(toAnchor)
 
-        // 姿勢推定の微細な揺れがそのまま出るとぶれて見えるので、平滑化する
-        if let previous = smoothedPoint {
-            smoothedPoint = CGPoint(
-                x: previous.x + (projected.x - previous.x) * smoothing,
-                y: previous.y + (projected.y - previous.y) * smoothing)
+        // 距離。生のまま配ると大きさが毎フレーム変わる
+        let distance = simd_length(toPlant)
+        if let previous = smoothedDistance {
+            let next = previous + (distance - previous) * 0.08
+            smoothedDistance = next
+            // **配る値は段にしておく。**診断表示が毎フレーム組み直されるのを防ぐ。
+            // 大きさと置き場所は `liveDistance`（段のない値）を見る
+            if abs(next - anchorDistance) >= 0.02 { anchorDistance = next }
         } else {
-            smoothedPoint = projected
+            smoothedDistance = distance
+            anchorDistance = distance
         }
-        bubbleScreenPoint = smoothedPoint
+
+        // 経過時間で均しの強さを決める。フレームレートが落ちる端末でも
+        // 追従の速さを揃えるため、固定の係数にはしない
+        let dt = lastProjectedAt.map { max(1.0 / 120, min(0.1, frame.timestamp - $0)) } ?? 1.0 / 60
+        lastProjectedAt = frame.timestamp
+
+        plantScreenPoint = plantFilter.update(plantProjected, dt: dt)
+        updateTargetScale()
+        advanceScale(dt: dt)
+
+        // 本体の点。まだ無ければここで打つ（セリフの実寸が届くのを待っている）
+        if bubbleWorld == nil { pinBubble(animated: false) }
+        advanceBubbleMove(dt: dt)
+
+        guard let bubble = bubbleWorld, let bubbleProjected = arView.project(bubble) else {
+            bubbleScreenPoint = nil
+            return
+        }
+        bubbleScreenPoint = bubbleFilter.update(bubbleProjected, dt: dt)
+
+        evaluatePlacement()
+    }
+
+    /// 追従の状態を捨てる。打ち直したとき、見失ったときに呼ぶ。
+    /// 残すと、次に現れた吹き出しが前の位置から滑ってくる
+    private func resetTracking() {
+        plantFilter.reset()
+        bubbleFilter.reset()
+        lastProjectedAt = nil
+        smoothedDistance = nil
+        plantScreenPoint = nil
+        bubbleScreenPoint = nil
+        bubbleWorld = nil
+        bubbleTargetWorld = nil
+        plantUnitSize = nil
+        quadrant = nil
+        badSince = nil
+        placementLabel = "—"
+    }
+}
+
+/// 画面座標の震えを取る（D49）。
+///
+/// 縦横それぞれに 1€ フィルタを掛け、そのうえで**不感帯**を置く。
+/// フィルタを通しても最後の1ptは揺れ続け、`@Observable` の配り先が
+/// 毎フレーム組み直される。止まっているときは本当に止める。
+private struct PointFilter {
+    private var x = OneEuroFilter()
+    private var y = OneEuroFilter()
+    private var published: CGPoint?
+
+    /// これ以下の動きは配らない（pt）
+    private let deadZone: CGFloat = 1.2
+
+    mutating func reset() {
+        x.reset()
+        y.reset()
+        published = nil
+    }
+
+    mutating func update(_ point: CGPoint, dt: TimeInterval) -> CGPoint {
+        let smoothed = CGPoint(x: x.update(point.x, dt: dt), y: y.update(point.y, dt: dt))
+        guard let previous = published else {
+            published = smoothed
+            return smoothed
+        }
+        if abs(smoothed.x - previous.x) >= deadZone || abs(smoothed.y - previous.y) >= deadZone {
+            published = smoothed
+            return smoothed
+        }
+        return previous
+    }
+}
+
+/// 1€ フィルタ（Casiez et al., 2012）。
+///
+/// **震えと遅れは、普通は片方しか取れない。**強く均せば止まって見えるが
+/// 追従が遅れ、弱く均せば追従するが震えが残る。このフィルタは
+/// **動きの速さから均しの強さを毎フレーム決める**ことで両方を取る。
+///
+///   - ほとんど動いていない → 強く均す（手ぶれの震えが消える）
+///   - 速く動いている       → ほとんど均さない（向けた先にすぐ追いつく）
+private struct OneEuroFilter {
+    /// 止まっているときの遮断周波数（Hz）。小さいほど強く均す
+    var minCutoff: Double = 0.8
+    /// 速さに応じて遮断周波数を上げる度合い。大きいほど素早く追う
+    var beta: Double = 0.010
+    /// 速さそのものを均す強さ。速さが震えると、均しの強さも震える
+    var derivativeCutoff: Double = 1.0
+
+    private var value: Double?
+    private var derivative: Double = 0
+
+    mutating func reset() {
+        value = nil
+        derivative = 0
+    }
+
+    mutating func update(_ input: CGFloat, dt: TimeInterval) -> CGFloat {
+        CGFloat(update(Double(input), dt: dt))
+    }
+
+    private mutating func update(_ input: Double, dt: TimeInterval) -> Double {
+        guard dt > 0 else { return value ?? input }
+        guard let previous = value else {
+            value = input
+            return input
+        }
+        let speed = (input - previous) / dt
+        derivative += Self.alpha(cutoff: derivativeCutoff, dt: dt) * (speed - derivative)
+        let cutoff = minCutoff + beta * abs(derivative)
+        let smoothed = previous + Self.alpha(cutoff: cutoff, dt: dt) * (input - previous)
+        value = smoothed
+        return smoothed
+    }
+
+    /// 遮断周波数と経過時間から、1次の平滑化の係数を出す
+    private static func alpha(cutoff: Double, dt: TimeInterval) -> Double {
+        let tau = 1 / (2 * .pi * cutoff)
+        return 1 / (1 + tau / dt)
     }
 }
 

@@ -48,15 +48,25 @@ struct CameraTab: View {
                 ARViewContainer(controller: scene)
                     .ignoresSafeArea()
 
-                if let point = scene.bubbleScreenPoint, !line.isEmpty {
-                    SpeechBubble(text: line)
-                        .scaleEffect(bubbleScale)
-                        .position(point)
-                        .id(line)
-                        .transition(.scale(scale: 0.8).combined(with: .opacity))
-                        // 吹き出しの位置はARの投影で決まる。
-                        // キーボードで座標系がずれると、植物から離れる
-                        .ignoresSafeArea(.keyboard)
+                if let center = scene.bubbleScreenPoint, let target = scene.plantScreenPoint,
+                    !line.isEmpty
+                {
+                    AnchoredSpeechBubble(
+                        text: line,
+                        center: center,
+                        target: target,
+                        // 明るい部屋では地を濃くする。弧と同じ実測値を使う
+                        ambientBrightness: scene.ambientBrightness,
+                        // 距離に反比例する倍率。決めているのは SceneController（D50-a）
+                        scale: scene.bubbleScale
+                    )
+                    .id(line)
+                    .transition(.scale(scale: 0.85).combined(with: .opacity))
+                    // **安全領域ごと無視する。**吹き出しの座標は ARView の
+                    // 画面いっぱいの座標系で来る。ここで座標系が縮むと、
+                    // ノッチのぶんだけ下にずれて植物から離れる。
+                    // キーボードで持ち上がらないのも同じ理由（`.all` に含まれる）
+                    .ignoresSafeArea()
                 }
 
                 if isNaming { namingField }
@@ -109,7 +119,10 @@ struct CameraTab: View {
                     .zIndex(2)
             }
         }
-        .animation(.spring(duration: 0.35), value: scene.bubbleScreenPoint)
+        // **投影した点にアニメーションを掛けない。**毎フレーム更新される値に
+        // バネを掛けると、追いつく前に次の目標が来て、吹き出しが遅れて泳ぐ。
+        // 止まった瞬間には行き過ぎて戻る。震えの始末は SceneController の
+        // フィルタが受け持つ（D49）
         .animation(.spring(duration: 0.35), value: line)
         .animation(.spring(duration: 0.3), value: isNaming)
         .animation(.easeInOut(duration: 0.22), value: pendingCapture?.id)
@@ -142,6 +155,11 @@ struct CameraTab: View {
             }
         }
         .onChange(of: scene.subject) { _, subject in respond(to: subject) }
+        // **セリフの実寸を先に渡す。**置き場所（D50）と倍率（D50-a）は
+        // 本体の大きさから決まるので、描いてから測るのでは順番が回らない
+        .onChange(of: line, initial: true) { _, new in
+            scene.bubbleLayoutSize = new.isEmpty ? .zero : BubbleMetrics.layoutSize(for: new)
+        }
         // 見ている株が居なくなったら（削除・リセット）見当たらない状態に戻す。
         // 吹き出しだけが残ると、誰に話しかけられているのか分からなくなる
         .onChange(of: model.store.selectedPlantId) { _, id in
@@ -630,6 +648,29 @@ struct CameraTab: View {
                 scene.bubbleScreenPoint.map {
                     String(format: "(%.0f, %.0f)", $0.x, $0.y)
                 } ?? "画面外")
+            row("置き場所", scene.placementLabel)
+            row("倍率", String(format: "%.2f", scene.bubbleScale))
+            row(
+                "被写体の面積",
+                String(format: "%.3f / %.2f", scene.lastSubjectArea, scene.minSubjectArea))
+            row("枠の収まり", scene.lastFraming)
+            row("落ちた条件", scene.lastRejection)
+            HStack {
+                Text("捉えた条件").foregroundStyle(.secondary)
+                Spacer()
+                Picker(
+                    "捉えた条件",
+                    selection: Binding(
+                        get: { scene.framingRule },
+                        set: { scene.framingRule = $0 })
+                ) {
+                    ForEach(SceneController.FramingRule.allCases, id: \.self) { rule in
+                        Text(rule.label).tag(rule)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .frame(width: 170)
+            }
 
             if !scene.topLabels.isEmpty {
                 Divider().padding(.vertical, 2)
@@ -645,6 +686,26 @@ struct CameraTab: View {
             }
 
             Divider().padding(.vertical, 2)
+            HStack {
+                Text("吹き出しの比").foregroundStyle(.secondary)
+                Slider(
+                    value: Binding(
+                        get: { scene.plantSizeRatio },
+                        set: { scene.plantSizeRatio = $0 }
+                    ), in: 0.12...0.45)
+                Text(String(format: "%.2f", scene.plantSizeRatio))
+                    .frame(width: 38, alignment: .trailing)
+            }
+            HStack {
+                Text("面積の下限").foregroundStyle(.secondary)
+                Slider(
+                    value: Binding(
+                        get: { scene.minSubjectArea },
+                        set: { scene.minSubjectArea = $0 }
+                    ), in: 0.03...0.30)
+                Text(String(format: "%.2f", scene.minSubjectArea))
+                    .frame(width: 38, alignment: .trailing)
+            }
             HStack {
                 Text("しきい値").foregroundStyle(.secondary)
                 Slider(
@@ -678,9 +739,4 @@ struct CameraTab: View {
         }
     }
 
-    /// 遠いほど小さく見せる。空間に置かれている感じを出す
-    private var bubbleScale: CGFloat {
-        let d = CGFloat(scene.anchorDistance)
-        return max(0.6, min(1.2, 1.2 / max(0.5, d)))
-    }
 }

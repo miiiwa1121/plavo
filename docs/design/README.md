@@ -12,6 +12,7 @@ plavo の設計ドキュメント一覧。要件は [../requirements/](../requir
 | [gadget-interface.md](./gadget-interface.md) | ガジェットとアプリの契約。**ハード担当に渡す仕様書** | 初版 |
 | [screen-design.md](./screen-design.md) | 画面設計。各画面の要素・状態・遷移・空状態 | 初版 |
 | [haptics.md](./haptics.md) | 触覚の設計。2つの層、語彙、画面ごとの割り当て（鳴らさない場所を含む）（D48） | 段階1・2 実装済み。強さの詰めは実機待ち |
+| [speech-bubble.md](./speech-bubble.md) | 吹き出しの設計。半透明の風船と輪郭に沿う反射、先端を打った点に合わせる置きかた、震えの取りかた（D49） | 実装済み。数値の詰めは実機待ち |
 
 ## 設計の前提
 
