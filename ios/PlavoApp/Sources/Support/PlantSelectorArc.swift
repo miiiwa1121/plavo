@@ -72,6 +72,9 @@ struct PlantSelectorArc: View {
     @State private var wheelAngleAtDragStart: Double = 0
     /// 直前に触覚を鳴らした位置。同じところで鳴り続けないように持つ
     @State private var lastFeedbackIndex: Int = -1
+    /// 回しているあいだの刻み。**掴んでいるあいだだけ持つ**（haptics.md §6.4）。
+    /// 鳴らすたびに作り直すと、温める間が無く回し始めの手応えが鈍る
+    @State private var ticker: Haptics.Ticker?
     /// 名前の実寸。塊の大きさをこれに合わせる
     @State private var itemSizes: [String: CGSize] = [:]
     /// 切っていないときの名前の幅。**見えているほうを測ってはいけない。**
@@ -327,6 +330,8 @@ struct PlantSelectorArc: View {
         .onChange(of: autoSelectedAt) { _, value in
             // 黙って切り替わると気づけない。一度開いて見せる（D39）
             guard value != nil else { return }
+            // 目を向けていなくても、切り替わったことが手に返る
+            Haptics.tap()
             alignToSelection()
             expanded = true
             scheduleCollapse()
@@ -598,6 +603,9 @@ struct PlantSelectorArc: View {
                             guard !Task.isCancelled else { return }
                             alignToSelection()
                             expanded = true
+                            // 0.175秒待ってから開くので、開いたことが手で分かると
+                            // 迷わずそのまま滑り出せる
+                            Haptics.tap()
                             beginTurning(from: v.translation.height)
                         }
                     }
@@ -612,6 +620,7 @@ struct PlantSelectorArc: View {
             .onEnded { _ in
                 pressTask?.cancel()
                 pressTask = nil
+                ticker = nil
                 if mode == .moving {
                     UserDefaults.standard.set(Double(barOffset), forKey: "arcOffset")
                 } else if mode == .selecting {
@@ -640,6 +649,7 @@ struct PlantSelectorArc: View {
     /// 開いた時点ですでに指が動いているので、その移動量を差し引く
     private func beginTurning(from translation: CGFloat) {
         mode = .selecting
+        ticker = Haptics.Ticker()
         wheelAngleAtDragStart = wheelAngle - Double(translation) / Double(pointsPerStep) * step
         lastFeedbackIndex = highlightIndex
         turn(to: translation)
@@ -659,7 +669,7 @@ struct PlantSelectorArc: View {
         let index = highlightIndex
         if index != lastFeedbackIndex {
             lastFeedbackIndex = index
-            UISelectionFeedbackGenerator().selectionChanged()
+            ticker?.tick()
         }
     }
 
@@ -669,6 +679,9 @@ struct PlantSelectorArc: View {
         let index = highlightIndex
         guard index < choices.count else { return }
         model.store.selectedPlantId = choices[index].plantId
+        // **離してから決まる方式なので、決まった合図が要る**（D41）。
+        // 通過の刻み（tick）と区別がつく手応えにする
+        Haptics.snap()
         // 中途半端な角度で止めない。決まった位置へ寄せる
         withAnimation(.spring(duration: 0.24)) {
             wheelAngle = -Double(index) * step

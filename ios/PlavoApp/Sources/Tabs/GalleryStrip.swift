@@ -56,6 +56,12 @@ struct GalleryStripView: View {
             strip
         }
         .background(Color(uiColor: .systemGroupedBackground))
+        // 見ている1枚が変わるたびに刻む。列をなぞっても、メインを送っても、
+        // 列の1枚をタップしても、起きていることは同じ。
+        //
+        // **全画面では刻まない。**1枚だけを見るための場所で、
+        // 手応えを足すと見ることから注意が逸れる
+        .sensoryFeedback(.tick, trigger: current) { _, _ in !showFull }
         .navigationBarTitleDisplayMode(.inline)
         .navigationDestination(isPresented: $showFull) {
             PhotoViewer(photos: photos, current: $current, model: model)

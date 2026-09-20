@@ -77,13 +77,19 @@ struct PlantConfirmView: View {
 
     private var buttons: some View {
         HStack(spacing: 14) {
-            Button("撮り直す") { onRetake() }
+            Button("撮り直す") {
+                Haptics.tap()
+                onRetake()
+            }
                 .font(.callout.weight(.medium))
                 .foregroundStyle(.white)
                 .padding(.horizontal, 22).padding(.vertical, 14)
                 .background(.white.opacity(0.18), in: Capsule())
 
             Button {
+                // **ここで出会いの手応えは返さない。**
+                // 相手が話し始めるのは、画面が戻ってから
+                Haptics.tap()
                 onTalk()
             } label: {
                 Label("話しかける", systemImage: "bubble.left.fill")

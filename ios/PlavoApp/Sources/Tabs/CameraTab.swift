@@ -125,6 +125,8 @@ struct CameraTab: View {
         // どのみちキーボードの下に隠れる位置にある
         .toolbar(isNaming ? .hidden : .visible, for: .tabBar)
         .onAppear {
+            // 植物の触覚が鳴るのはほぼこの画面。先に温めておく
+            Haptics.prepare()
             scene.bind(model: model)
             // タブに戻ったときにセッションを再開する。
             // これが無いと止まったままになり、最後のフレームが残って固まる
@@ -161,6 +163,10 @@ struct CameraTab: View {
             // 残しておくと、次に別の株を見たときに「はじめまして」と言い出す
             addingPlant = false
         case .plant:
+            // **居ることを返す。**迎えている最中でも、すでに選ばれている株でも、
+            // 見つけた瞬間に起きていることは同じ。
+            // **迎え入れの合図（meet）はここではない。**名前が決まったとき（D48）
+            Haptics.plant(.pulse)
             // 迎えている最中のときだけ、出会いから始める（D9・D40-a）。
             // **向けただけでは新しい株は増えない。**シャッターの「迎える」を
             // 通っていないなら、相手はすでに選ばれている株に決まっている
@@ -180,19 +186,30 @@ struct CameraTab: View {
         case .panel(let key, _):
             // パネルではAI診断を走らせず、その日の記録を再生する（D33）
             guard let panel = model.bank?.panel(key) else { return }
+            // 記録の再生が始まる合図。**パネルに植物の触覚は使わない。**
+            // 紙であって生き物ではない
+            Haptics.tap()
             line = model.picker.pick(from: panel.lines, group: "panel-\(key)") ?? ""
         }
     }
 
     /// 帯域が変わったときだけセリフを引き直す。
     /// 毎秒引き直すと文字が落ち着かず、読めなくなる。
-    private func refreshLine(force: Bool) {
+    ///
+    /// - Parameter silent: 触覚を返さない。説明員が水分を直接いじる場面で使う
+    private func refreshLine(force: Bool, silent: Bool = false) {
         guard case .plant = scene.subject, let band = model.currentBand() else { return }
-        if force || band.key != lastBandKey {
+        let changed = band.key != lastBandKey
+        if force || changed {
             lastBandKey = band.key
             if let picked = model.picker.pick(from: band) {
                 line = picked
                 recordObservation(dialogue: picked)
+                // **帯域が変わったときだけ返す**（H-1）。
+                // セリフの伴奏なので、セリフが差し替わったここで鳴らす
+                if changed, !silent, let note = Haptics.Note(moistureBand: band.key) {
+                    Haptics.plant(note)
+                }
             }
         }
     }
@@ -312,8 +329,11 @@ struct CameraTab: View {
     /// 迎えるための1枚を撮り、そこから植物を探す。
     /// 撮れたらその1枚で画面を止め、確認に移る
     private func captureForAdd() async {
+        // 撮影には間がある。まず「受け取った」を返す
+        Haptics.tap()
         guard let data = await scene.capturePhoto(), let image = UIImage(data: data) else {
             captureNotice = "撮れませんでした"
+            Haptics.caution()
             return
         }
         let analysis = SceneController.analyze(image: image)
@@ -324,6 +344,8 @@ struct CameraTab: View {
         line = ""
         pendingCapture = CapturedPlant(
             image: image, box: analysis?.box, plantScore: analysis?.plantScore ?? 0)
+        // 画面が止まる手応え
+        Haptics.snap()
     }
 
     /// 確認をやめて、もう一度撮る
@@ -349,6 +371,7 @@ struct CameraTab: View {
     private func capture() async {
         guard let plantId = model.store.plantForToday else {
             captureNotice = "先に「迎える」で迎えてね"
+            Haptics.caution()
             return
         }
         model.store.ensureTodayPage()
@@ -358,13 +381,20 @@ struct CameraTab: View {
         guard let today = model.store.todayEntry() else { return }
         guard model.store.canAddPhoto(to: today) else {
             captureNotice = "今日はもう\(DiaryEntry.maxPhotosPerDay)枚あります"
+            Haptics.caution()
             return
         }
 
+        // **押した瞬間には撮影の手応えを返さない。**
+        // `captureHighResolutionFrame` には間があるので、まだ撮れていない。
+        // 受け取ったこと（tap）と、撮れたこと（snap）を分ける
+        Haptics.tap()
         guard let data = await scene.capturePhoto() else {
             captureNotice = "撮れませんでした"
+            Haptics.caution()
             return
         }
+        Haptics.snap()
         model.store.addPhoto(data, to: today.id)
         let count = model.store.todayEntry()?.photoRefs.count ?? 0
         captureNotice = "日記に追加しました（\(count)/\(DiaryEntry.maxPhotosPerDay)）"
@@ -416,7 +446,12 @@ struct CameraTab: View {
         // シャッターに重ならないよう、少し上に置く
         .padding(.bottom, 116)
         .contentShape(Rectangle())
-        .onLongPressGesture(minimumDuration: 1.5) { showMockControls.toggle() }
+        // 長押しの成立を返す。来場者には関係しない操作だが、
+        // 1.5秒押して何も起きないと、押せているのかが分からない
+        .onLongPressGesture(minimumDuration: 1.5) {
+            showMockControls.toggle()
+            Haptics.tap()
+        }
     }
 
     /// いまどの株を見ているか（D41）。
@@ -465,6 +500,8 @@ struct CameraTab: View {
             Button {
                 // 水やりは数分で土に染みる。1ステップの跳ね上がりとして表現する
                 model.updateMoisture(min(100, model.soilMoisture + 45))
+                // **ここで触覚を鳴らさない。**帯域が `watered` に変わるので、
+                // セリフと一緒に `drink` が返る。押した瞬間にも鳴らすと二重になる
                 refreshLine(force: true)
             } label: {
                 Label("水をあげる", systemImage: "drop.fill")
@@ -477,7 +514,9 @@ struct CameraTab: View {
                         get: { model.soilMoisture },
                         set: {
                             model.updateMoisture($0)
-                            refreshLine(force: true)
+                            // **鳴らさない。**動かすたびに帯域をまたぐので、
+                            // 渇きと水を得た手応えが交互に鳴る
+                            refreshLine(force: true, silent: true)
                         }), in: 0...100)
                 Text("\(Int(model.soilMoisture))%")
                     .monospacedDigit().frame(width: 44, alignment: .trailing)
@@ -490,6 +529,7 @@ struct CameraTab: View {
                     line = ""
                 }
                 Button("リセット", role: .destructive) {
+                    Haptics.thud()
                     model.reset()
                     scene.redetect()
                     line = ""
@@ -531,6 +571,10 @@ struct CameraTab: View {
         let name = nameDraft.trimmingCharacters(in: .whitespaces)
         guard !name.isEmpty else { return }
         model.store.register(name: name, species: model.profile.displayName)
+        // **迎え入れが成立するのはここ**（D48）。
+        // 「はじめまして」で鳴らすと、数秒のうちに2回鳴って
+        // どちらが成立なのか分からなくなる
+        Haptics.plant(.meet)
         nameDraft = ""
         isNaming = false
         addingPlant = false

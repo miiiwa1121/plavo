@@ -51,7 +51,10 @@ struct AvatarCropView: View {
                     Button("やめる") { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("決定") { commit() }
+                    Button("決定") {
+                        Haptics.tap()
+                        commit()
+                    }
                 }
             }
         }

@@ -67,14 +67,22 @@ private struct DiaryGrid: View {
                         DiaryTile(entry: entry, model: model)
                             // 展開したお休みは、ダブルタップで畳む。
                             // count: 2 を先に置かないと、シングルが先に取られる
+                            // ダブルタップは当たったかどうかが分かりにくい
                             .onTapGesture(count: 2) {
-                                if let runId { expanded.remove(runId) }
+                                guard let runId else { return }
+                                Haptics.tap()
+                                expanded.remove(runId)
                             }
                             .onTapGesture { path.append(entry.id) }
 
                     case .restRun(let id, let entries):
                         RestRunTile(entries: entries)
-                            .onTapGesture { expanded.insert(id) }
+                            // 何日ぶんかが一度に現れる。開いた手応えがあると、
+                            // 増えたマスが何なのか分かる
+                            .onTapGesture {
+                                Haptics.tap()
+                                expanded.insert(id)
+                            }
                     }
                 }
             }
@@ -500,6 +508,7 @@ private struct DiaryCard: View {
             guard let data = try? await item.loadTransferable(type: Data.self) else { return }
             await MainActor.run {
                 model.store.addPhoto(data, to: entryId)
+                Haptics.tap()
                 pickerItem = nil
             }
         }

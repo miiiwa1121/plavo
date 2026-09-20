@@ -61,6 +61,7 @@ struct GrowthSection: View {
         let selection = Binding(
             get: { range },
             set: { newRange in
+                if newRange != range { Haptics.tick() }
                 let length = newRange.visibleLength(
                     dataSpan: domain.upperBound.timeIntervalSince(domain.lowerBound))
                 scrollX = domain.upperBound.addingTimeInterval(-length)

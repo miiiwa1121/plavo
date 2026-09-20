@@ -67,10 +67,14 @@ struct ShutterBar: View {
             DragGesture(minimumDistance: 12)
                 .onEnded { v in
                     guard let index = modes.firstIndex(of: mode) else { return }
+                    // **切り替えは下端のどこを滑らせても効く。**
+                    // 指の下にボタンが無いので、手応えが無いと切り替わったか分からない
                     if v.translation.width < -switchThreshold, index + 1 < modes.count {
                         mode = modes[index + 1]
+                        Haptics.tick()
                     } else if v.translation.width > switchThreshold, index > 0 {
                         mode = modes[index - 1]
+                        Haptics.tick()
                     }
                 }
         )
@@ -81,9 +85,12 @@ struct ShutterBar: View {
         let size = selected ? bigSize : smallSize
         return Button {
             if selected {
+                // 押した手応えと撮れた手応えは、撮る側（CameraTab）が返す。
+                // ここで鳴らすと、撮影が始まる前に1つ増える
                 onFire()
             } else {
                 mode = m
+                Haptics.tick()
             }
         } label: {
             ZStack {

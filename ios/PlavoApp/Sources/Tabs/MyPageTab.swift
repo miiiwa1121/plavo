@@ -65,10 +65,23 @@ struct MyPageTab: View {
                 }
             }
             .navigationTitle("プロフィール")
+            // 繋がったか、繋がらなかったか。**繋がらなくても体験は止まらない**（F-10）ので、
+            // 強くは鳴らさない
+            .sensoryFeedback(trigger: model.sensor.state) { _, state in
+                switch state {
+                case .connected: .tap
+                case .failed: .caution
+                default: nil
+                }
+            }
             .confirmationDialog(
                 "リセットしますか", isPresented: $showResetConfirm, titleVisibility: .visible
             ) {
-                Button("リセットする", role: .destructive) { model.reset() }
+                Button("リセットする", role: .destructive) {
+                    // 来場者の記録が消える。展示の区切り
+                    Haptics.thud()
+                    model.reset()
+                }
                 Button("やめる", role: .cancel) {}
             }
         }

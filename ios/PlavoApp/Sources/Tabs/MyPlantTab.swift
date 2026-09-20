@@ -224,6 +224,9 @@ struct PlantDetailView: View {
             }
         }
         .background(Color(uiColor: .systemGroupedBackground))
+        // セグメントで押しても、スワイプでめくっても同じ手応えにする。
+        // どちらも「ページが変わった」という同じことをしている
+        .sensoryFeedback(.tick, trigger: page)
         .navigationTitle(plant?.name ?? "")
         .navigationBarTitleDisplayMode(.inline)
         // **ギャラリーのページの中ではなく、ここに置く。**
@@ -259,6 +262,9 @@ struct PlantDetailView: View {
             "本当に削除しますか", isPresented: $showRemoveConfirm, titleVisibility: .visible
         ) {
             Button("削除する", role: .destructive) {
+                // **成功として鳴らさない。**D18-a で植物を人と同等に扱うと決めた以上、
+                // ここは作業の完了ではなく別れ（D48）
+                Haptics.plant(.farewell)
                 model.store.remove(plantId)
                 dismiss()
             }
@@ -371,6 +377,9 @@ struct PlantDetailView: View {
                 Section {
                     if model.store.stage(of: plantId) != .withered {
                         Button("この子を観察する") {
+                            // 見る相手が変わる。**弧で選んだときと同じ手応えに揃える**
+                            // ——同じことをしている
+                            Haptics.snap()
                             model.store.selectedPlantId = plantId
                         }
                         .disabled(model.store.selectedPlantId == plantId)
