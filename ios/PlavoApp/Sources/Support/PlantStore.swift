@@ -98,19 +98,20 @@ final class PlantStore {
         }
         observations[plant.id] = obs
 
-        // **日記は1日1ページ。書かなかった日もページを作る。**
-        // 記録しなかった日を無かったことにはしない（D18-a）。
+        // **日記は1日1ページ。書かなかった日もページを作る**（D18-a）。
+        // 何も無いページは日記には並べない（DiaryTab）が、ページそのものは持っておく。
+        // **株では分けない。**同じ日に別の株のページがあれば、そこへ足す（`addToDay`）
         for day in 1...max(1, plan.days) {
             guard let date = Calendar.current.date(byAdding: .day, value: day, to: plantedAt)
             else { continue }
             // **今日のページは作らない。**今日は来場者のもの。
-            // 仕込みが1ページでも置くと、その1枚が写真の枠（5枚）を食い、
-            // 1枚目から「2/5」になる。筋書き側でも昨日までに収めてある
+            // 仕込みが1ページでも置くと、その1枚が写真の枠（1日10枚）を食い、
+            // 1枚目から「2/10」になる。筋書き側でも昨日までに収めてある
             guard !Calendar.current.isDateInToday(date) else { continue }
             let stage = plan.stage(upTo: day)
             let shots = plan.shots[day] ?? 1
             if let text = plan.milestoneText[day] {
-                diary.append(
+                addToDay(
                     DiaryEntry(
                         plantId: plant.id,
                         date: date,
@@ -125,7 +126,7 @@ final class PlantStore {
                         author: .auto))
             } else if let ordinary = plan.ordinary[day] {
                 // 段階の変わり目ではないが、何か書いた日
-                diary.append(
+                addToDay(
                     DiaryEntry(
                         plantId: plant.id,
                         date: date,
@@ -139,7 +140,7 @@ final class PlantStore {
                         author: .user))
             } else {
                 // お休みした日
-                diary.append(
+                addToDay(
                     DiaryEntry(
                         plantId: plant.id,
                         date: date,
@@ -150,6 +151,32 @@ final class PlantStore {
             }
         }
         diary.sort { $0.date > $1.date }
+    }
+
+    /// その日のページに足す。**日記は1日1ページで、株では分けない。**
+    ///
+    /// 仕込みは株ごとに筋書きを持つので、2株が同じ日に書いていることがある。
+    /// その日のページが既にあれば、写真も本文もそこへ足す（写真は、その日に撮った分が
+    /// すべてその日のページに入る）。
+    ///
+    /// ページの主役（見出しの N日目・段階と、引用）は、先にそのページで書いていた株のまま。
+    /// 先のページが空なら、書いたほうを主役にする
+    private func addToDay(_ entry: DiaryEntry) {
+        guard
+            let i = diary.firstIndex(where: {
+                Calendar.current.isDate($0.date, inSameDayAs: entry.date)
+            })
+        else {
+            diary.append(entry)
+            return
+        }
+        guard !entry.isRest else { return }
+        guard !diary[i].isRest else {
+            diary[i] = entry
+            return
+        }
+        diary[i].photos += entry.photos
+        diary[i].text = [diary[i].text, entry.text].filter { !$0.isEmpty }.joined(separator: "\n\n")
     }
 
     /// 仮の写真を描いて置き、その株の写真として返す（D47 / D54）。
@@ -369,21 +396,56 @@ final class PlantStore {
         diary[i].text = text
     }
 
-    /// 写真を足す。**上限は株ごと**（D54）。達していれば false を返す
+    /// 写真を足す。**上限はページ全体**（`DiaryEntry.maxPhotosPerDay`）。達していれば false を返す
     @discardableResult
     func addPhoto(_ data: Data, to id: UUID, of plantId: UUID?) -> Bool {
         guard let i = diary.firstIndex(where: { $0.id == id }) else { return false }
-        guard canAddPhoto(to: diary[i], of: plantId) else { return false }
+        guard diary[i].canAddPhoto else { return false }
         let ref = UUID().uuidString
         images[ref] = data
         diary[i].photos.append(DiaryPhoto(ref: ref, plantId: plantId))
         return true
     }
 
-    func removePhoto(_ ref: String, from id: UUID) {
+    /// 日記のページから外す。**ギャラリーには残す**
+    func removeFromDiary(_ ref: String, in id: UUID) {
+        guard let i = diary.firstIndex(where: { $0.id == id }),
+            let j = diary[i].photos.firstIndex(where: { $0.ref == ref })
+        else { return }
+        diary[i].photos[j].removedFromDiary = true
+        forgetIfUnused(i, j)
+    }
+
+    /// 日記のページの写真を並べ替える。`refs` はページに並ぶ写真の新しい並び。
+    ///
+    /// **日記から外した写真は、元の位置のまま動かさない。**ギャラリーにだけ並んでいる写真の
+    /// 並びまで、ページの都合で崩さないため
+    func reorderDiaryPhotos(in id: UUID, to refs: [String]) {
         guard let i = diary.firstIndex(where: { $0.id == id }) else { return }
-        diary[i].photos.removeAll { $0.ref == ref }
-        images[ref] = nil
+        let shown = Dictionary(uniqueKeysWithValues: diary[i].diaryPhotos.map { ($0.ref, $0) })
+        guard refs.count == shown.count, Set(refs) == Set(shown.keys) else { return }
+        var next = refs.compactMap { shown[$0] }.makeIterator()
+        diary[i].photos = diary[i].photos.map { $0.removedFromDiary ? $0 : (next.next() ?? $0) }
+    }
+
+    /// ギャラリーから外す。**日記には残す。**
+    /// ギャラリーはページを知らずに写真だけを持つので、写真からページを探す
+    func removeFromGallery(_ ref: String) {
+        guard let i = diary.firstIndex(where: { $0.photos.contains { $0.ref == ref } }),
+            let j = diary[i].photos.firstIndex(where: { $0.ref == ref })
+        else { return }
+        diary[i].photos[j].removedFromGallery = true
+        forgetIfUnused(i, j)
+    }
+
+    /// 日記からもギャラリーからも外れた写真は、実体ごと手放す。
+    /// どこにも並ばない写真を持ち続けても、メモリを食うだけ（D36 により保存もしない）
+    private func forgetIfUnused(_ i: Int, _ j: Int) {
+        let photo = diary[i].photos[j]
+        guard photo.isUnused else { return }
+        diary[i].photos.remove(at: j)
+        images[photo.ref] = nil
+        seededPhotoRefs.remove(photo.ref)
     }
 
     func image(_ ref: String) -> Data? { images[ref] }
@@ -436,9 +498,11 @@ final class PlantStore {
     ///
     /// **ページではなく写真で絞る**（D54）。同じ日に2株を撮ると1ページに混ざるため、
     /// ページの主役で絞ると、もう一方の株の写真まで連れてきてしまう。
+    ///
+    /// ギャラリーから外した写真は除く。日記から外した写真は含める。
     func photos(of plantId: UUID) -> [PlantPhoto] {
         diary.flatMap { entry in
-            entry.photos.reversed()
+            entry.galleryPhotos.reversed()
                 .filter { $0.plantId == plantId }
                 .map {
                     PlantPhoto(
@@ -460,11 +524,6 @@ final class PlantStore {
         diary[i].plantId = plantId
         diary[i].stage = stage(of: plantId)
         diary[i].dayLabel = dayLabel(for: plantId)
-    }
-
-    /// その株を、この日にもう1枚撮れるか（D54）
-    func canAddPhoto(to entry: DiaryEntry, of plantId: UUID?) -> Bool {
-        entry.photoCount(of: plantId) < DiaryEntry.maxPhotosPerPlantPerDay
     }
 
     // MARK: - 取り出し

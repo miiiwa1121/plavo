@@ -483,7 +483,7 @@ struct PlantSelectorArc: View {
     /// 手本のタブバーでも、選択中を示しているのは無彩色の塗りひとつ。
     ///
     /// **着色しない。**色が付いているのは中身（名前）のほうだけ。
-    /// 塊を青くすると、同じ色の名前が読めなくなる。
+    /// 塊をアクセント色（緑・D55）で塗ると、同じ色の名前が読めなくなる。
     private func nameFrameVisual(centerY: CGFloat) -> some View {
         nameFrameShape(centerY: centerY, fill: nameFrameFill)
     }

@@ -9,9 +9,15 @@ import SwiftUI
 /// 例外は詳細の「育成」だけで、そこでは実測値を出す（D43 / GrowthSection）。
 struct MyPlantTab: View {
     @Bindable var model: AppModel
+    @State private var path: [UUID] = []
+    /// 起動引数で開いた詳細の、最初のページ（動作確認用）。一覧へ戻ったら 0 に戻す
+    @State private var launchPage = 0
+    /// 起動引数による「詳細を開く」を済ませたか。**1回だけ効かせる。**
+    /// 一覧が出るたびに効かせると、詳細から戻った瞬間にまた開き、一覧に戻れない
+    @State private var launchHandled = false
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             Group {
                 if model.store.plants.isEmpty {
                     emptyState
@@ -20,11 +26,28 @@ struct MyPlantTab: View {
                 }
             }
             .navigationTitle("マイプラント")
+            // 一番上の画面の見出しは細くする。日記に揃える（D56）
+            .navigationBarTitleDisplayMode(.inline)
             // **行き先を直接渡す NavigationLink（`NavigationLink { 行き先 }`）は使わない。**
             // navigationDestination と同じスタックに混ぜると、詳細からギャラリーの1枚へ
             // 進んだとき、詳細ごと作り直されて「記録」に戻された
             .navigationDestination(for: UUID.self) { id in
-                PlantDetailView(model: model, plantId: id)
+                PlantDetailView(model: model, plantId: id, initialPage: launchPage)
+            }
+            // 動作確認用。`-openDetail YES` で先頭の株の詳細を開き、
+            // `-startDetailPage 1` でそのページから始める（ios/README.md）
+            .onAppear {
+                guard !launchHandled else { return }
+                launchHandled = true
+                guard UserDefaults.standard.bool(forKey: "openDetail"),
+                    let first = model.store.plants.first?.id
+                else { return }
+                let page = UserDefaults.standard.integer(forKey: "startDetailPage")
+                launchPage = (0...2).contains(page) ? page : 0
+                path = [first]
+            }
+            .onChange(of: path) { _, path in
+                if path.isEmpty { launchPage = 0 }
             }
         }
     }
@@ -168,6 +191,13 @@ struct PlantDetailView: View {
 
     private var plant: Plant? { model.store.plant(plantId) }
 
+    /// - Parameter initialPage: 最初に出すページ。ふだんは記録（0）
+    init(model: AppModel, plantId: UUID, initialPage: Int = 0) {
+        self.model = model
+        self.plantId = plantId
+        _page = State(initialValue: initialPage)
+    }
+
     var body: some View {
         // **帯を敷かない。日記と同じく、中身は画面の端まで流れ、操作部品はその上に浮く**（D45）。
         //
@@ -179,49 +209,44 @@ struct PlantDetailView: View {
         // TabView はページの枠を安全領域の高さで作り、広げた中身をその上下中央に置くらしい。
         // ずれを足さないと、時間幅のバーがタブバーに重なる。式を決め打ちせず、測って打ち消す。
         GeometryReader { proxy in
-            let top = proxy.safeAreaInsets.top + pickerHeight - pageShift
+            // 中身はずれのぶん上へ伸ばしてあり、画面の上端から始まる（`pageContent`）
+            let top = proxy.safeAreaInsets.top + pickerHeight
             let bottom = proxy.safeAreaInsets.bottom + pageShift
 
             TabView(selection: $page) {
-                records
-                    .safeAreaPadding(.top, top)
-                    .safeAreaPadding(.bottom, bottom)
-                    .onGeometryChange(for: CGFloat.self) {
-                        $0.frame(in: .global).minY - $0.safeAreaInsets.top
-                    } action: { pageShift = $0 }
+                pageContent(records, top: top, bottom: bottom)
                     .tag(0)
-                GrowthSection(model: model, plantId: plantId)
-                    .safeAreaPadding(.top, top)
-                    .safeAreaPadding(.bottom, bottom)
+                pageContent(GrowthSection(model: model, plantId: plantId), top: top, bottom: bottom)
                     .tag(1)
-                gallery
-                    .safeAreaPadding(.top, top)
-                    .safeAreaPadding(.bottom, bottom)
+                pageContent(gallery, top: top, bottom: bottom)
                     .tag(2)
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
             .ignoresSafeArea()
             .overlay(alignment: .top) {
-                Picker("", selection: $page) {
-                    Text("記録").tag(0)
-                    Text("育成").tag(1)
-                    Text("ギャラリー").tag(2)
-                }
-                .pickerStyle(.segmented)
-                .padding(4)
-                .floatingGlass()
-                .padding(.horizontal)
+                CapsuleTabBar(
+                    selection: $page,
+                    items: [
+                        .init(0, title: "記録"),
+                        .init(1, title: "育成"),
+                        .init(2, title: "ギャラリー"),
+                    ],
+                    itemWidth: 78
+                )
                 .padding(.bottom, 8)
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { pickerHeight = $0 }
                 // 重ねる側も画面の上端から数える。題名と時計の下に置くぶんは自分で下げる
                 .padding(.top, proxy.safeAreaInsets.top)
-                .scrollEdgeFade()
+                // **ぼかしは画面の幅いっぱいに敷く。**切り替えは中身の幅しか持たないので、
+                // 広げずに敷くと切り替えの真上の細い列にしか掛からない
+                .frame(maxWidth: .infinity)
+                .scrollEdgeFade(bottomPadding: 8)
                 .frame(maxHeight: .infinity, alignment: .top)
                 .ignoresSafeArea()
             }
         }
         .background(Color(uiColor: .systemGroupedBackground))
-        // セグメントで押しても、スワイプでめくっても同じ手応えにする。
+        // 切り替えを押しても、スワイプでめくっても同じ手応えにする。
         // どちらも「ページが変わった」という同じことをしている
         .sensoryFeedback(.tick, trigger: page)
         .navigationTitle(plant?.name ?? "")
@@ -231,9 +256,7 @@ struct PlantDetailView: View {
         // グリッドの写真をタップしても移らなかった
         .navigationDestination(isPresented: $showGalleryStrip) {
             // グリッドは新しい順。1枚を追う画面は時間の流れで並べる（D46）
-            GalleryStripView(
-                photos: model.store.photos(of: plantId).reversed(), current: $galleryFocus, model: model
-            )
+            GalleryStripView(plantId: plantId, current: $galleryFocus, model: model)
             // マスから拡大して開き、戻るときは**そのとき見ている写真の**マスへ縮む（D46-a）
             .navigationTransition(.zoom(sourceID: galleryFocus, in: galleryZoom))
         }
@@ -279,8 +302,28 @@ struct PlantDetailView: View {
 
     // MARK: - 記録
 
+    /// 1ページ分。上下の余白を足し直し、**ずれを測る。**
+    ///
+    /// **ずれはどのページでも測る。**以前は記録だけで測っていて、育成やギャラリーから
+    /// 開いたとき（`-startDetailPage`）は記録が描かれず、ずれが 0 のままだった。
+    /// その 16pt ぶん時間幅のバーが下がり、タブバーの下に潜った。
+    /// ずれはどのページも同じなので、どれが測っても同じ値になる
+    ///
+    /// **中身はずれのぶん上へ伸ばす。**ページは画面の上端から 16pt 下に置かれるので、
+    /// そのままだとスクロールした中身が上端の 16pt に届かない。上端のぼかしは半透明なので、
+    /// そこだけ中身が無く、線で切れたように見えた。
+    /// ずれはページの枠で測る（伸ばした中身で測ると 0 になり、伸ばす量も 0 に戻る）
+    private func pageContent(_ content: some View, top: CGFloat, bottom: CGFloat) -> some View {
+        content
+            .safeAreaPadding(.top, top)
+            .safeAreaPadding(.bottom, bottom)
+            .padding(.top, -pageShift)
+            .onGeometryChange(for: CGFloat.self) {
+                $0.frame(in: .global).minY - $0.safeAreaInsets.top
+            } action: { pageShift = $0 }
+    }
+
     /// 節目の記録。数値は出さない（原則2）
-    @ViewBuilder
     private var records: some View {
         List {
             if let plant {

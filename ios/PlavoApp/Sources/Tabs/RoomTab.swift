@@ -19,6 +19,8 @@ struct RoomTab: View {
                     .multilineTextAlignment(.center)
             }
             .navigationTitle("ルーム")
+            // 一番上の画面の見出しは細くする。日記に揃える（D56）
+            .navigationBarTitleDisplayMode(.inline)
         }
     }
 }

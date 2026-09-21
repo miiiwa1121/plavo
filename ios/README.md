@@ -119,6 +119,17 @@ xcrun simctl launch <device> dev.plavo.PlavoApp -startTab 2
 | 3 | ルーム |
 | 4 | プロフィール |
 
+マイプラントの詳細を直接開くこともできる（動作確認用）。
+
+```bash
+xcrun simctl launch <device> dev.plavo.PlavoApp -startTab 1 -openDetail YES -startDetailPage 1
+```
+
+| 引数 | 効き目 |
+|---|---|
+| `-openDetail YES` | 先頭の株の詳細を開く。**起動直後に1回だけ効く**（一覧へ戻ればそのまま一覧に留まる） |
+| `-startDetailPage <0〜2>` | `-openDetail` で開いた詳細を、そのページから始める。0 記録 / 1 育成 / 2 ギャラリー |
+
 ### 実機が必要な部分
 
 **ARKit はシミュレータで動かない。**カメラタブは実機でしか確認できない。マイプラント・日記・ルーム・プロフィールはシミュレータで確認できる。

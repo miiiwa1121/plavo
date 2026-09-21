@@ -40,6 +40,14 @@ targets:
     dependencies:
       - package: PlavoCore
         product: PlavoCore
+    settings:
+      base:
+        # アプリのアクセント色を緑にする（D55）。タブバーの選択中も、
+        # `Color.accentColor` も、標準の部品の色もここから決まる
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        # アイコンはまだ無い。xcodegen の既定（AppIcon）のままだと、
+        # カタログを置いた時点で「AppIcon が無い」と失敗する
+        ASSETCATALOG_COMPILER_APPICON_NAME: ""
     info:
       path: Info.plist
       properties:

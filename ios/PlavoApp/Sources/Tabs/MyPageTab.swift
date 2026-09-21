@@ -65,6 +65,8 @@ struct MyPageTab: View {
                 }
             }
             .navigationTitle("プロフィール")
+            // 一番上の画面の見出しは細くする。日記に揃える（D56）
+            .navigationBarTitleDisplayMode(.inline)
             // 繋がったか、繋がらなかったか。**繋がらなくても体験は止まらない**（F-10）ので、
             // 強くは鳴らさない
             .sensoryFeedback(trigger: model.sensor.state) { _, state in

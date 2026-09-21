@@ -11,9 +11,7 @@ import SwiftUI
 /// 上下にスクロールして前後の日記を続けて読める。
 struct DiaryTab: View {
     @Bindable var model: AppModel
-    /// タイルのタップを自前で扱うため、遷移を明示的に持つ。
-    /// NavigationLink のままだと、シングルタップとダブルタップを
-    /// 区別できない（お休みのまとまりを畳むのにダブルタップを使う）。
+    /// マスをタップすると、そのページから縦フィードへ進む
     @State private var path = NavigationPath()
 
     var body: some View {
@@ -25,15 +23,11 @@ struct DiaryTab: View {
                     DiaryGrid(model: model, path: $path)
                 }
             }
-            // **大見出しにしない。細い見出しのまま置く。**
+            // **大見出しにしない。細い見出しにする。**ほかのタブの一番上の画面もこれに揃える。
             //
-            // 大見出しは送ると畳み、戻すと広がる。高さが変わるということは
-            // 内容の位置が動くということで、遅れて作られるマス（`LazyVGrid`）と
-            // 噛み合うと、高さが変わる → 位置が直る → 畳み具合が変わる、と往復して
-            // **小さく上下に揺れる。**
-            //
-            // 細い見出しは高さが変わらないので、これが起きない。
-            // 薄い地（ガラス）も残るため、送った写真が時計の下を素通りしない
+            // 大見出しにすると、上へ送ったときにカクつく。マスを無地の色に置き換えても
+            // 治らなかったので、原因はマスの中身（写真・影）ではなく、
+            // 大見出しと並べ方（`ScrollView` ＋ `LazyVGrid`）の組み合わせにある
             .navigationTitle("日記")
             .navigationBarTitleDisplayMode(.inline)
         }
@@ -52,6 +46,16 @@ struct DiaryTab: View {
     }
 }
 
+extension PlantStore {
+    /// 日記に並べるページ（一覧・縦フィードとも）。
+    ///
+    /// **何も無い日は出さない。**書いていない・写真も無いページは持っているが並べない。
+    /// **今日だけは空でも出す。**書く場所が要る
+    var shownDiary: [DiaryEntry] {
+        diary.filter { !$0.isRest || Calendar.current.isDateInToday($0.date) }
+    }
+}
+
 // MARK: - グリッド
 
 private struct DiaryGrid: View {
@@ -61,8 +65,8 @@ private struct DiaryGrid: View {
     /// マスの間隔。詰めるほど「量」が伝わる
     private let spacing: CGFloat = 2
 
-    /// 展開したお休みのまとまり
-    @State private var expanded: Set<UUID> = []
+    /// 一覧の幅。マスの一辺をここから決める
+    @State private var width: CGFloat = 0
 
     private var columns: [GridItem] {
         Array(repeating: GridItem(.flexible(), spacing: spacing), count: 3)
@@ -72,50 +76,25 @@ private struct DiaryGrid: View {
         // **一辺を先に決める。**`aspectRatio` に高さを導かせると、
         // マスが作られるたびに高さを測り直すことになり、
         // 送っている最中に内容の位置が細かくずれる
-        GeometryReader { proxy in
-            let side = max(1, (proxy.size.width - spacing * 2) / 3)
+        //
+        // **幅は `GeometryReader` で包んで取らない。**包むと、上の余白が変わるたびに
+        //（見出しの高さなど）一覧全体が組み直される。
+        // 背景で幅だけを測り、変わったときにだけ組み直す
+        let side = max(1, (width - spacing * 2) / 3)
 
-            ScrollView {
+        ScrollView {
+            // 幅が測れるまでは並べない。一辺 1pt のまま並べると、全部のマスが
+            // 画面に収まってしまい、写真を一度に全部開くことになる。
+            // **代わりに透明な1行を置く。**中身が空だとスクロールそのものが幅 0 になり、
+            // 幅が測れず、いつまでも並ばなかった
+            if width <= 0 {
+                Color.clear.frame(maxWidth: .infinity, minHeight: 1)
+            } else {
                 LazyVGrid(columns: columns, spacing: spacing) {
-                    ForEach(units) { unit in
-                        switch unit {
-                        case .entry(let entry, let runId):
-                            // **畳む二度打ちは、畳めるマスにだけ付ける。**
-                            //
-                            // 全部のマスに付けると、指を置くたびに「二度目が来るか」を
-                            // 待つことになり、その間スクロールが始まらない。待ってから
-                            // 追いつくので、**送り始めに引っかかって見える。**
-                            // 畳めないマス（お休みのまとまりの外）では、待った末に
-                            // `guard` で何もせず帰るだけだった。
-                            if let runId {
-                                DiaryTile(entry: entry, model: model)
-                                    .frame(width: side, height: side)
-                                    // count: 2 を先に置かないと、シングルが先に取られる
-                                    .onTapGesture(count: 2) {
-                                        Haptics.tap()
-                                        withAnimation(.easeInOut(duration: 0.2)) {
-                                            expanded.remove(runId)
-                                        }
-                                    }
-                                    .onTapGesture { path.append(entry.id) }
-                            } else {
-                                DiaryTile(entry: entry, model: model)
-                                    .frame(width: side, height: side)
-                                    .onTapGesture { path.append(entry.id) }
-                            }
-
-                        case .restRun(let id, let entries):
-                            RestRunTile(entries: entries)
-                                .frame(width: side, height: side)
-                                // 何日ぶんかが一度に現れる。開いた手応えがあると、
-                                // 増えたマスが何なのか分かる
-                                .onTapGesture {
-                                    Haptics.tap()
-                                    withAnimation(.easeInOut(duration: 0.2)) {
-                                        expanded.insert(id)
-                                    }
-                                }
-                        }
+                    ForEach(model.store.shownDiary) { entry in
+                        DiaryTile(entry: entry, model: model)
+                            .frame(width: side, height: side)
+                            .onTapGesture { path.append(entry.id) }
                     }
                 }
                 // **見出しの薄い地に、1枚目を重ねない。**
@@ -123,101 +102,21 @@ private struct DiaryGrid: View {
                 // 色がかぶって見える
                 .padding(.top, 16)
             }
-            // **`.animation` をスクロールに掛けない。**
-            // 掛けると、送っている最中に作られるマスの配置まで動きの対象になる。
-            // 畳む・広げるのは操作した場所で `withAnimation` に包む
-            .navigationDestination(for: UUID.self) { id in
-                DiaryFeedView(model: model, startId: id)
+        }
+        // 幅は背景で受け取る。`onGeometryChange` は値が変わったときにしか呼ばれず、
+        // 幅が最初から変わらないここでは一度も届かなかった（一覧が空のままになった）
+        .background {
+            GeometryReader { proxy in
+                Color.clear
+                    .onAppear { width = proxy.size.width }
+                    .onChange(of: proxy.size.width) { _, new in width = new }
             }
         }
-    }
-
-    /// グリッドに並べる単位。
-    ///
-    /// **お休みが2日以上続いたら1枚にまとめる。**
-    /// 書かなかった日も残すという方針（D18-a）は保ちつつ、
-    /// 空白がグリッドを埋め尽くさないようにする。タップすると展開する。
-    private var units: [GridUnit] {
-        var result: [GridUnit] = []
-        var run: [DiaryEntry] = []
-
-        func flush() {
-            guard !run.isEmpty else { return }
-            // 1日だけなら、まとめずにそのまま出す
-            if run.count == 1 {
-                result.append(.entry(run[0], runId: nil))
-            } else if let first = run.first, expanded.contains(first.id) {
-                // 展開中。畳めるように、どのまとまりに属するかを持たせる
-                result.append(contentsOf: run.map { .entry($0, runId: first.id) })
-            } else if let first = run.first {
-                result.append(.restRun(id: first.id, entries: run))
-            }
-            run.removeAll()
+        // **`.animation` をスクロールに掛けない。**
+        // 掛けると、送っている最中に作られるマスの配置まで動きの対象になる
+        .navigationDestination(for: UUID.self) { id in
+            DiaryFeedView(model: model, startId: id)
         }
-
-        for entry in model.store.diary {
-            // 今日は、まだ書いていなくてもまとめない。書く場所が要る
-            if entry.isRest && !Calendar.current.isDateInToday(entry.date) {
-                run.append(entry)
-            } else {
-                flush()
-                result.append(.entry(entry, runId: nil))
-            }
-        }
-        flush()
-        return result
-    }
-}
-
-private enum GridUnit: Identifiable {
-    /// runId は、展開中のお休みのまとまりに属する場合だけ入る。
-    /// ダブルタップで畳むときに、どのまとまりを閉じるかを知るために持つ。
-    case entry(DiaryEntry, runId: UUID?)
-    case restRun(id: UUID, entries: [DiaryEntry])
-
-    var id: UUID {
-        switch self {
-        case .entry(let e, _): e.id
-        case .restRun(let id, _): id
-        }
-    }
-}
-
-/// 連続したお休みをまとめたマス。タップすると展開する。
-private struct RestRunTile: View {
-    let entries: [DiaryEntry]
-
-    /// グリッドは新しい順に並ぶので、範囲は古い日から新しい日へ書く
-    private var range: String {
-        guard let newest = entries.first, let oldest = entries.last else { return "" }
-        return "\(DiaryTile.shortDate(oldest.date))〜\(DiaryTile.shortDate(newest.date))"
-    }
-
-    var body: some View {
-        Color.clear
-            .aspectRatio(1, contentMode: .fit)
-            .overlay { Rectangle().fill(Color(uiColor: .secondarySystemBackground)) }
-            .overlay {
-                VStack(spacing: 5) {
-                    Text("お休み").font(.caption2)
-                    Text("\(entries.count)日").font(.caption.weight(.semibold))
-                }
-                .foregroundStyle(.tertiary)
-            }
-            .overlay(alignment: .bottom) {
-                HStack {
-                    Text(range)
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundStyle(.tertiary)
-                    Spacer()
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 8))
-                        .foregroundStyle(.tertiary)
-                }
-                .padding(6)
-            }
-            .clipped()
-            .contentShape(Rectangle())
     }
 }
 
@@ -229,8 +128,6 @@ private struct RestRunTile: View {
 private struct DiaryTile: View {
     let entry: DiaryEntry
     let model: AppModel
-
-    private var isToday: Bool { Calendar.current.isDateInToday(entry.date) }
 
     var body: some View {
         // **先に正方形を確定させ、そこへ画像を流し込む。**
@@ -252,23 +149,15 @@ private struct DiaryTile: View {
                 .resizable()
                 .scaledToFill()
         } else if entry.isRest {
-            rest
+            todayBlank
         } else {
             fallback
         }
     }
 
+    /// **日付だけを置く。**書いたかどうかや枚数の印は出さない。マスは写真で見せる
     private var labels: some View {
         VStack(spacing: 0) {
-            // 複数枚あることを右上に示す
-            if entry.photoRefs.count > 1 {
-                HStack {
-                    Spacer()
-                    Image(systemName: "square.on.square")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.white).shadow(radius: 2)
-                }
-            }
             Spacer(minLength: 0)
             HStack {
                 // 日記は全体で一つなので、株ごとの「N日目」ではなく日付を出す。
@@ -276,37 +165,26 @@ private struct DiaryTile: View {
                 // 何の日数なのか分からなくなる。
                 Text(Self.shortDate(entry.date))
                     .font(.caption2.weight(.semibold))
-                    // お休みの日は背景が明るいので、白文字では読めない
+                    // 空の今日は背景が明るいので、白文字では読めない
                     .foregroundStyle(
                         entry.isRest ? AnyShapeStyle(.tertiary) : AnyShapeStyle(.white)
                     )
                     .shadow(radius: entry.isRest ? 0 : 2)
                 Spacer()
-                if !entry.isRest && entry.author == .user {
-                    Image(systemName: "pencil")
-                        .font(.system(size: 9))
-                        .foregroundStyle(.white).shadow(radius: 2)
-                }
             }
         }
         .padding(6)
     }
 
-    /// 何も書かなかった日。
-    ///
-    /// **記録しなかった日も残す**（D18-a）。ただし静かに置く——
-    /// 書いた日が引き立つよう、色を持たせない。
-    private var rest: some View {
+    /// まだ何も無い今日。**空のマスは今日だけ並ぶ**（何も無い日は日記に出さない）。
+    /// 書く場所なので、色を持たせず静かに置く
+    private var todayBlank: some View {
         ZStack {
             Rectangle().fill(Color(uiColor: .secondarySystemBackground))
             VStack(spacing: 4) {
-                if isToday {
-                    Image(systemName: "square.and.pencil")
-                        .font(.system(size: 18))
-                    Text("今日").font(.caption2)
-                } else {
-                    Text("お休み").font(.caption2)
-                }
+                Image(systemName: "square.and.pencil")
+                    .font(.system(size: 18))
+                Text("今日").font(.caption2)
             }
             .foregroundStyle(.tertiary)
         }
@@ -368,13 +246,25 @@ private struct DiaryFeedView: View {
     @Bindable var model: AppModel
     let startId: UUID
 
+    /// いま書いているカード。キーボードの「完了」で外す
+    @FocusState private var editingId: UUID?
+    /// 並べるページ。**開いたときに決め、見ている間は変えない。**
+    /// その都度決めると、写真の無い日の本文を消した途端にカードが消え、書いている途中で追い出される
+    @State private var ids: [UUID]
+
+    init(model: AppModel, startId: UUID) {
+        self.model = model
+        self.startId = startId
+        _ids = State(initialValue: model.store.shownDiary.map(\.id))
+    }
+
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: 18) {
-                    ForEach(model.store.diary) { entry in
-                        DiaryCard(model: model, entryId: entry.id)
-                            .id(entry.id)
+                    ForEach(ids, id: \.self) { id in
+                        DiaryCard(model: model, entryId: id, editing: $editingId)
+                            .id(id)
                     }
                 }
                 .padding()
@@ -386,6 +276,23 @@ private struct DiaryFeedView: View {
         .navigationBarTitleDisplayMode(.inline)
         // 一覧では隠してあるので、ここでは明示して出す（戻る道がここにある）
         .toolbar(.visible, for: .navigationBar)
+        // **本文は改行できるので、Return ではキーボードが閉じない。**閉じる道をキーボードの上に置く。
+        // カードごとに置くと、並んだカードの数だけ「完了」が重なるので、ここで1つだけ持つ
+        .toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                // 送るときの紙飛行機。**右を向かせる。**そのままだと右上を向く
+                Button {
+                    // 書いたものを受け取った、という小さい確定
+                    Haptics.tap()
+                    editingId = nil
+                } label: {
+                    Image(systemName: "paperplane.fill")
+                        .rotationEffect(.degrees(45))
+                }
+                .accessibilityLabel("完了")
+            }
+        }
     }
 }
 
@@ -393,10 +300,33 @@ private struct DiaryFeedView: View {
 private struct DiaryCard: View {
     @Bindable var model: AppModel
     let entryId: UUID
+    /// 書いているカード。フィードで1つだけ持つ（「完了」で外すため）
+    var editing: FocusState<UUID?>.Binding
 
     @State private var pickerItem: PhotosPickerItem?
     @State private var page = 0
-    @FocusState private var editing: Bool
+    @State private var confirmDelete = false
+
+    /// 並べ替えの最中の状態。長押しで始まり、指を離すと終わる
+    @State private var arrange: Arrangement?
+    /// 持ち上げている写真の位置（カードの座標）。**並びとは分けて持つ。**
+    /// 並びの入れ替えは動きを付けるが、指の位置に動きを付けると指から遅れる
+    @State private var dragPoint: CGPoint = .zero
+    /// 写真の段と見出しのゴミ箱の位置（カードの座標）。指がどこにあるかを見る
+    @State private var photoFrame: CGRect = .zero
+    @State private var trashFrame: CGRect = .zero
+
+    private struct Arrangement: Equatable {
+        /// 並べ替え中の並び
+        var order: [String]
+        /// 持ち上げている写真
+        var ref: String
+        /// ゴミ箱に重ねているか
+        var overTrash = false
+    }
+
+    /// カードの余白。写真を送る幅は、この余白のぶんカードの端まで広げる
+    private static let padding: CGFloat = 16
 
     private var entry: DiaryEntry? {
         model.store.diary.first { $0.id == entryId }
@@ -410,8 +340,12 @@ private struct DiaryCard: View {
                 text(entry)
                 quote(entry)
             }
-            .padding(16)
+            .padding(Self.padding)
             .background(.background, in: RoundedRectangle(cornerRadius: 14))
+            // 指の位置、写真の段、ゴミ箱を同じ座標で比べる
+            .coordinateSpace(.named(entryId))
+            // 持ち上げた写真はカードの上に浮かせる。見出しのゴミ箱まで運べるように
+            .overlay(alignment: .topLeading) { lifted }
             .onChange(of: pickerItem) { _, item in load(item) }
         }
     }
@@ -420,19 +354,19 @@ private struct DiaryCard: View {
 
     private func header(_ entry: DiaryEntry) -> some View {
         HStack(spacing: 8) {
-            // カードには両方出す。日付で位置が分かり、N日目で成長が分かる
+            // **日付だけを出す。**「N日目」や段階は株ごとのもので、
+            // 株で分けない1日1ページの見出しには合わない
             Text(format(entry.date))
                 .font(.caption.weight(.semibold))
-            if let day = entry.dayLabel {
-                Text(day).font(.caption).foregroundStyle(.secondary)
-            }
-            if let stage = entry.stage {
-                Text(stage.label).font(.caption).foregroundStyle(.secondary)
-            }
             Spacer()
 
-            // 上限は株ごと（D54）。ページの写真は、その日の主役の分として足す
-            if model.store.canAddPhoto(to: entry, of: entry.plantId) {
+            // ゴミ箱は「+」の横。写真が無ければ消すものも無い
+            if !entry.photoRefs.isEmpty {
+                deleteButton
+            }
+
+            // 上限はページ全体。ページの写真は、その日の主役の分として足す
+            if entry.canAddPhoto {
                 // 写真を足す。上限に達したら消える
                 PhotosPicker(selection: $pickerItem, matching: .images) {
                     Image(systemName: "plus")
@@ -441,46 +375,228 @@ private struct DiaryCard: View {
                         .background(.quaternary, in: Circle())
                 }
             } else {
-                Text("\(DiaryEntry.maxPhotosPerPlantPerDay)枚まで")
+                Text("\(DiaryEntry.maxPhotosPerDay)枚まで")
                     .font(.caption2).foregroundStyle(.tertiary)
             }
         }
     }
 
+    /// 見ている1枚を日記から外す。「+」の横に並べる。**丸い地は敷かない。**赤い線のアイコンだけ
+    ///
+    /// **並べ替えのときは、写真を運んで重ねる先にもなる。**重ねると赤く満ちる。
+    ///
+    /// **ギャラリーには残す。**ページに並べる写真を選び直すための操作で、
+    /// その子の育ちの記録まで欠けさせない
+    private var deleteButton: some View {
+        let over = arrange?.overTrash == true
+        // 確認を出すところでは鳴らさない。確認は始まりであって結末ではない（haptics.md）
+        return Button { confirmDelete = true } label: {
+            Image(systemName: "trash")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(over ? Color.white : Color.red)
+                .frame(width: 26, height: 26)
+                // ふだんは地を敷かない。運んで重ねたときだけ赤く満ちる
+                .background(over ? AnyShapeStyle(.red) : AnyShapeStyle(.clear), in: Circle())
+                .scaleEffect(over ? 1.3 : 1)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("写真を削除")
+        .animation(.snappy(duration: 0.15), value: over)
+        .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(entryId)) } action: { trashFrame = $0 }
+        .confirmationDialog("この写真を日記から削除しますか？", isPresented: $confirmDelete, titleVisibility: .visible) {
+            Button("日記から削除", role: .destructive) { deletePhoto() }
+        } message: {
+            Text("ギャラリーには残ります")
+        }
+    }
+
+    private func deletePhoto() {
+        guard let refs = entry?.photoRefs, refs.indices.contains(page) else { return }
+        model.store.removeFromDiary(refs[page], in: entryId)
+        Haptics.thud()
+        // 最後の1枚を消したら、1つ前へ。番号がはみ出すと何も映らない
+        page = min(page, max(0, refs.count - 2))
+    }
+
     // MARK: - 写真
 
-    /// 左右にスワイプして見る。下に位置を示す点を並べる
+    private static let photoHeight: CGFloat = 240
+    private static let photoShape = RoundedRectangle(cornerRadius: 10, style: .continuous)
+
+    /// 左右にスワイプして見る。下に位置を示す点を並べる。
+    /// 長押しすると並べ替えになる（`arrangeRow`）
     @ViewBuilder
     private func photos(_ entry: DiaryEntry) -> some View {
         if entry.photoRefs.isEmpty {
             placeholder(entry)
         } else {
             VStack(spacing: 8) {
-                TabView(selection: $page) {
-                    ForEach(Array(entry.photoRefs.enumerated()), id: \.element) { index, ref in
-                        if let data = model.store.image(ref),
-                            let image = UIImage(data: data)
-                        {
-                            // 枠を先に決めてから流し込む。写真の縦横比で
-                            // カードの高さが変わらないようにする
-                            Color.clear
-                                .overlay {
-                                    Image(uiImage: image).resizable().scaledToFill()
-                                }
-                                .clipped()
-                                .tag(index)
-                        }
+                ZStack {
+                    pager(entry)
+                        // 並べ替えの間は隠す。**外さない。**指が触れているのはこの中なので、
+                        // 外すと長押しの続きが届かなくなるおそれがある
+                        .opacity(arrange == nil ? 1 : 0)
+                    if let arrange {
+                        arrangeRow(arrange)
                     }
                 }
-                .tabViewStyle(.page(indexDisplayMode: .never))
-                .frame(height: 240)
-                .clipShape(RoundedRectangle(cornerRadius: 10))
+                .frame(height: Self.photoHeight)
+                .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(entryId)) } action: {
+                    photoFrame = $0
+                }
+                .gesture(
+                    LongPressDrag(
+                        space: .named(entryId),
+                        began: beginArranging, changed: moveArranging, ended: endArranging))
 
                 if entry.photoRefs.count > 1 {
                     dots(count: entry.photoRefs.count)
+                        .opacity(arrange == nil ? 1 : 0)
                 }
             }
         }
+    }
+
+    /// **1枚ずつ角を丸めて送る。**角の丸い窓の中を写真が流れるのではなく、
+    /// 角の丸い写真そのものが流れる。
+    ///
+    /// 送る幅はカードの余白のぶん両側へ広げ、各ページの内側に同じだけ空ける。
+    /// 写真は本文と同じ幅に収まり、送るときは写真と写真の間が余白2つぶん空く
+    private func pager(_ entry: DiaryEntry) -> some View {
+        TabView(selection: $page) {
+            ForEach(Array(entry.photoRefs.enumerated()), id: \.element) { index, ref in
+                // 枠を先に決めてから流し込む。写真の縦横比で
+                // カードの高さが変わらないようにする
+                Color.clear
+                    .overlay { photo(ref) }
+                    .clipShape(Self.photoShape)
+                    .padding(.horizontal, Self.padding)
+                    .tag(index)
+            }
+        }
+        .tabViewStyle(.page(indexDisplayMode: .never))
+        .padding(.horizontal, -Self.padding)
+    }
+
+    @ViewBuilder
+    private func photo(_ ref: String) -> some View {
+        if let data = model.store.image(ref), let image = UIImage(data: data) {
+            Image(uiImage: image).resizable().scaledToFill()
+        } else {
+            Rectangle().fill(.quaternary)
+        }
+    }
+
+    // MARK: - 並べ替え
+
+    private static let rowSpacing: CGFloat = 6
+    private static let rowMaxSide: CGFloat = 88
+
+    /// 並べ替えの間は、**写真を全部小さくして1列に並べる。**
+    /// 1枚ずつ送る形のままでは、遠くへ運ぶ先が見えない。
+    /// 持ち上げている写真の場所は空けておき、どこに落ちるかを見せる
+    private func arrangeRow(_ a: Arrangement) -> some View {
+        let side = rowSide(count: a.order.count)
+        return HStack(spacing: Self.rowSpacing) {
+            ForEach(a.order, id: \.self) { ref in
+                thumb(ref, side: side)
+                    .opacity(ref == a.ref ? 0 : 1)
+            }
+        }
+    }
+
+    /// 持ち上げている写真。指に付いて動く。ゴミ箱に重ねると縮む
+    @ViewBuilder
+    private var lifted: some View {
+        if let arrange {
+            thumb(arrange.ref, side: rowSide(count: arrange.order.count))
+                .scaleEffect(arrange.overTrash ? 0.5 : 1.15)
+                .opacity(arrange.overTrash ? 0.7 : 1)
+                .shadow(color: .black.opacity(0.25), radius: 10, y: 4)
+                .animation(.snappy(duration: 0.15), value: arrange.overTrash)
+                .position(dragPoint)
+                .allowsHitTesting(false)
+        }
+    }
+
+    private func thumb(_ ref: String, side: CGFloat) -> some View {
+        Color.clear
+            .frame(width: side, height: side)
+            .overlay {
+                if let image = model.store.thumbnail(ref, maxPixel: 300) {
+                    Image(uiImage: image).resizable().scaledToFill()
+                } else {
+                    Rectangle().fill(.quaternary)
+                }
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+
+    /// 並べたときの1枚の一辺。**全部を1列に収める。**収まる限りは大きく
+    private func rowSide(count: Int) -> CGFloat {
+        let n = CGFloat(max(1, count))
+        let fit = (photoFrame.width - Self.rowSpacing * (n - 1)) / n
+        return max(1, min(Self.rowMaxSide, fit))
+    }
+
+    /// 指の横の位置が、列の何番目にあたるか
+    private func slot(at x: CGFloat, count: Int) -> Int {
+        let side = rowSide(count: count)
+        let n = CGFloat(count)
+        let rowWidth = side * n + Self.rowSpacing * (n - 1)
+        let start = photoFrame.midX - rowWidth / 2
+        let i = Int(((x - start) / (side + Self.rowSpacing)).rounded(.down))
+        return min(max(i, 0), count - 1)
+    }
+
+    private func beginArranging(at point: CGPoint) {
+        guard let refs = entry?.photoRefs, refs.indices.contains(page) else { return }
+        // 持ち上げたことを返す
+        Haptics.tap()
+        dragPoint = point
+        withAnimation(.snappy(duration: 0.25)) {
+            arrange = Arrangement(order: refs, ref: refs[page])
+        }
+    }
+
+    private func moveArranging(to point: CGPoint) {
+        guard var a = arrange else { return }
+        dragPoint = point
+        let over = trashFrame.insetBy(dx: -16, dy: -16).contains(point)
+        if over != a.overTrash {
+            if over { Haptics.tick() }
+            a.overTrash = over
+        }
+        // ゴミ箱に重ねている間は、並びを動かさない
+        if !over, let from = a.order.firstIndex(of: a.ref) {
+            let to = slot(at: point.x, count: a.order.count)
+            if to != from {
+                a.order.move(fromOffsets: IndexSet(integer: from), toOffset: to > from ? to + 1 : to)
+                Haptics.tick()
+            }
+        }
+        guard a != arrange else { return }
+        withAnimation(.snappy(duration: 0.2)) { arrange = a }
+    }
+
+    /// 離したところで決める。ゴミ箱の上なら日記から外し、それ以外は並びを残す。
+    ///
+    /// **運んで外すときは確認を出さない。**長押しして運び、重ねて離すまでが
+    /// 確かめる手順になっている。外してもギャラリーには残る
+    private func endArranging(cancelled: Bool) {
+        guard let a = arrange else { return }
+        if !cancelled {
+            model.store.reorderDiaryPhotos(in: entryId, to: a.order)
+            let index = a.order.firstIndex(of: a.ref) ?? 0
+            if a.overTrash {
+                model.store.removeFromDiary(a.ref, in: entryId)
+                Haptics.thud()
+                page = min(index, max(0, a.order.count - 2))
+            } else {
+                page = index
+            }
+        }
+        withAnimation(.snappy(duration: 0.25)) { arrange = nil }
     }
 
     /// 「・・・・」。いま何枚目かが分かる
@@ -523,7 +639,7 @@ private struct DiaryCard: View {
             ),
             axis: .vertical
         )
-        .focused($editing)
+        .focused(editing, equals: entryId)
         .font(.callout)
         .lineSpacing(4)
         .textFieldStyle(.plain)
@@ -559,5 +675,36 @@ private struct DiaryCard: View {
         f.locale = Locale(identifier: "ja_JP")
         f.dateFormat = "M月d日"
         return f.string(from: date)
+    }
+}
+
+// MARK: - 長押しして運ぶ
+
+/// 長押ししてから、そのまま指を動かす。UIKit の長押しは、認められたあとも指の動きを返し続ける。
+///
+/// **SwiftUI の DragGesture を使わない。**スクロールの中に置くと、縦の送りや
+/// 写真の左右の送りを奪う。長押しは、指を止めて待たない限り認められないので、
+/// ふつうに送る指には何もしない。認められたあとは、送りのほうが動かなくなる
+private struct LongPressDrag: UIGestureRecognizerRepresentable {
+    let space: NamedCoordinateSpace
+    let began: (CGPoint) -> Void
+    let changed: (CGPoint) -> Void
+    let ended: (_ cancelled: Bool) -> Void
+
+    func makeUIGestureRecognizer(context: Context) -> UILongPressGestureRecognizer {
+        let recognizer = UILongPressGestureRecognizer()
+        recognizer.minimumPressDuration = 0.35
+        return recognizer
+    }
+
+    func handleUIGestureRecognizerAction(_ recognizer: UILongPressGestureRecognizer, context: Context) {
+        let point = context.converter.location(in: space)
+        switch recognizer.state {
+        case .began: began(point)
+        case .changed: changed(point)
+        case .ended: ended(false)
+        case .cancelled, .failed: ended(true)
+        default: break
+        }
     }
 }

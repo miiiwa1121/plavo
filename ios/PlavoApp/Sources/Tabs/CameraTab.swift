@@ -422,10 +422,9 @@ struct CameraTab: View {
         model.store.attachPlantToToday(plantId)
 
         guard let today = model.store.todayEntry() else { return }
-        // 上限は株ごと（D54）。どの株が満ちたのかが分かるように名前を添える
-        guard model.store.canAddPhoto(to: today, of: plantId) else {
-            let name = model.store.plant(plantId)?.name ?? "この子"
-            captureNotice = "\(name)は今日もう\(DiaryEntry.maxPhotosPerPlantPerDay)枚あります"
+        // 上限はその日のページ全体。どの株を撮った写真も数える
+        guard today.canAddPhoto else {
+            captureNotice = "今日はもう\(DiaryEntry.maxPhotosPerDay)枚あります"
             Haptics.caution()
             return
         }
@@ -441,8 +440,8 @@ struct CameraTab: View {
         }
         Haptics.snap()
         model.store.addPhoto(data, to: today.id, of: plantId)
-        let count = model.store.todayEntry()?.photoCount(of: plantId) ?? 0
-        captureNotice = "日記に追加しました（\(count)/\(DiaryEntry.maxPhotosPerPlantPerDay)）"
+        let count = model.store.todayEntry()?.photoCount ?? 0
+        captureNotice = "日記に追加しました（\(count)/\(DiaryEntry.maxPhotosPerDay)）"
     }
 
     // MARK: - 重ねる表示

@@ -11,8 +11,7 @@ import SwiftUI
 /// 動きは iPhone の写真アプリに合わせる（D46-a）。
 /// メインと列の見ている1枚は、写真の縦横比に関わらず形を固定する（D46-b）。
 struct GalleryStripView: View {
-    /// 古い順
-    let photos: [PlantPhoto]
+    let plantId: UUID
     /// メインに出している写真。グリッド・全画面と共有する。
     /// 戻るとき、ここにある写真のマスへ縮めるため
     @Binding var current: String
@@ -20,6 +19,11 @@ struct GalleryStripView: View {
 
     @State private var showFull = false
     @Namespace private var fullZoom
+    @State private var confirmDelete = false
+    @Environment(\.dismiss) private var dismiss
+
+    /// 古い順。**渡されたものを持たず、その都度引く。**消したら並びから抜けるように
+    private var photos: [PlantPhoto] { model.store.photos(of: plantId).reversed() }
 
     /// 列の送り位置
     @State private var stripPosition: ScrollPosition
@@ -41,10 +45,11 @@ struct GalleryStripView: View {
     /// 細い写真1枚ぶんの送り幅
     private static var pitch: CGFloat { collapsedWidth + spacing }
 
-    init(photos: [PlantPhoto], current: Binding<String>, model: AppModel) {
-        self.photos = photos
+    init(plantId: UUID, current: Binding<String>, model: AppModel) {
+        self.plantId = plantId
         self._current = current
         self.model = model
+        let photos: [PlantPhoto] = model.store.photos(of: plantId).reversed()
         let index = photos.firstIndex { $0.ref == current.wrappedValue } ?? 0
         _stripPosition = State(initialValue: ScrollPosition(x: Self.offset(centering: index)))
     }
@@ -68,6 +73,22 @@ struct GalleryStripView: View {
                 // メインから拡大して開き、戻るときは見ている写真へ縮む
                 .navigationTransition(.zoom(sourceID: current, in: fullZoom))
         }
+    }
+
+    /// 見ている1枚を消し、**隣の1枚へ移る。**右（新しい側）があればそちら、無ければ左。
+    /// 最後の1枚だったら、グリッドへ戻る
+    private func deleteCurrent() {
+        let before = photos
+        let i = index(of: current)
+        model.store.removeFromGallery(current)
+        Haptics.thud()
+
+        let after = before.filter { $0.ref != current }
+        guard !after.isEmpty else {
+            dismiss()
+            return
+        }
+        switchInstantly(to: after[min(i, after.count - 1)].ref)
     }
 
     // MARK: - メイン
@@ -122,9 +143,39 @@ struct GalleryStripView: View {
                 }
             }
             Spacer()
+            deleteButton
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
+    }
+
+    /// 見ている1枚をギャラリーから外す。写真の右下、撮った日と同じ行に置く。
+    /// **枠で囲まない。**写真を見る画面なので、線のアイコンだけにして目立たせすぎない。
+    ///
+    /// **日記には残す。**ギャラリーに並べる写真を選び直すための操作で、
+    /// その日のページまで欠けさせない
+    private var deleteButton: some View {
+        // 確認を出すところでは鳴らさない。確認は始まりであって結末ではない（haptics.md）
+        Button { confirmDelete = true } label: {
+            Image(systemName: "trash")
+                .font(.body)
+                .foregroundStyle(.red)
+                // 写真の右端から少し内側に置く。押せる広さは左へ取る
+                .frame(width: 32, height: 32, alignment: .trailing)
+                .padding(.trailing, 8)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        // 押せる広さのぶん行を高くしない。送るたびに位置が変わらないよう、日付の行の高さに収める
+        .padding(.vertical, -6)
+        .accessibilityLabel("写真を削除")
+        .confirmationDialog(
+            "この写真をギャラリーから削除しますか？", isPresented: $confirmDelete, titleVisibility: .visible
+        ) {
+            Button("ギャラリーから削除", role: .destructive) { deleteCurrent() }
+        } message: {
+            Text("日記には残ります")
+        }
     }
 
     // MARK: - 小さい写真の列

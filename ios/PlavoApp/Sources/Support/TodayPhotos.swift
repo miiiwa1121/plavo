@@ -131,8 +131,8 @@ struct TodayPhotosView: View {
 
     // MARK: - 小さい写真の列
 
-    /// **上限は1株3枚**（D54）なので、並ぶのはせいぜい数枚。
-    /// ギャラリーのような送りの仕掛けは要らず、横に並べて収まる。
+    /// 並ぶのは今日の分だけ（上限は1日10枚）。
+    /// ギャラリーのような送りの仕掛けは要らず、横に並べる。
     /// 収まらないときだけ横へ流れる
     private var strip: some View {
         ScrollViewReader { proxy in

@@ -142,30 +142,44 @@ public struct Plant: Codable, Sendable, Identifiable, Equatable {
 ///
 /// **どの株を撮ったかを写真そのものが持つ。**ページの主役（`DiaryEntry.plantId`）に
 /// 預けると、同じ日に2株を撮ったとき、後から撮ったほうの写真が
-/// 先の株のギャラリーに積まれる。上限も株ごとに数えられない。
+/// 先の株のギャラリーに積まれる。
 public struct DiaryPhoto: Codable, Sendable, Equatable, Hashable, Identifiable {
     /// 画像の実体への参照。実体は PlantStore が持つ
     public let ref: String
     /// 撮った相手。株が決まっていない日に足した写真は nil
     public var plantId: UUID?
+    /// 日記のページから外したか。**外してもギャラリーには残る。**
+    ///
+    /// 日記は「その日に何があったか」、ギャラリーは「この子がどう育ったか」。
+    /// 見せる目的が違うので、並べる写真もそれぞれで選び直せるようにする。
+    /// 片方で外しても、もう片方は欠けさせない
+    public var removedFromDiary: Bool
+    /// ギャラリーから外したか。**外しても日記には残る**
+    public var removedFromGallery: Bool
 
     public var id: String { ref }
 
-    public init(ref: String, plantId: UUID? = nil) {
+    /// 両方から外した。もうどこにも並ばないので、実体を手放してよい
+    public var isUnused: Bool { removedFromDiary && removedFromGallery }
+
+    public init(
+        ref: String, plantId: UUID? = nil,
+        removedFromDiary: Bool = false, removedFromGallery: Bool = false
+    ) {
         self.ref = ref
         self.plantId = plantId
+        self.removedFromDiary = removedFromDiary
+        self.removedFromGallery = removedFromGallery
     }
 }
 
 public struct DiaryEntry: Codable, Sendable, Identifiable, Equatable {
 
-    /// 1日に追加できる写真の上限。**株ごとに数える**（D54）。
+    /// 1日に日記へ足せる写真の上限。**ページ全体で数える。株では分けない。**
     ///
-    /// ページは1日に1枚だが、その日に複数の株を撮ることがある。
-    /// ページ全体で数えると、先に撮った株が枠を使い切り、
-    /// **もう一方の株が1枚も撮れなくなる。**
+    /// 日記は1日1ページで、その日に撮った写真はどの株のものでもそのページに入る。
     /// 多すぎると1日が冗長になり、少なすぎると記録しきれない。
-    public static let maxPhotosPerPlantPerDay = 3
+    public static let maxPhotosPerDay = 10
     public enum Author: String, Codable, Sendable {
         /// ユーザー本人が書いた
         case user
@@ -184,24 +198,35 @@ public struct DiaryEntry: Codable, Sendable, Identifiable, Equatable {
     public var text: String
     /// そのとき植物が言ったこと。引用として添える
     public var quotedDialogue: String?
-    /// その日に撮った写真。**どの株を撮ったかを1枚ずつ持つ**（D54）。
-    /// 上限は株ごとに DiaryEntry.maxPhotosPerPlantPerDay。
+    /// その日に撮った写真。**どの株を撮ったかを1枚ずつ持つ**（D54）。ギャラリーを株で分けるため。
+    /// 上限はページ全体で DiaryEntry.maxPhotosPerDay。
     /// 実体は PlantStore が持つ。ここでは識別子だけを扱い、
     /// ドメインのモデルに画像データを持ち込まない。
+    ///
+    /// **日記やギャラリーから外した写真も含む。**片方で外しても、もう片方には並ぶため。
+    /// ページに並べるのは `diaryPhotos`、ギャラリーに並べるのは `galleryPhotos`
     public var photos: [DiaryPhoto]
 
-    /// 並べる順のままの参照。表示だけが要るところで使う
-    public var photoRefs: [String] { photos.map(\.ref) }
+    /// ページに並べる写真。日記から外したものを除く
+    public var diaryPhotos: [DiaryPhoto] { photos.filter { !$0.removedFromDiary } }
 
-    /// その株の写真が、この日に何枚あるか
-    public func photoCount(of plantId: UUID?) -> Int {
-        photos.filter { $0.plantId == plantId }.count
-    }
+    /// ギャラリーに並べる写真。ギャラリーから外したものを除く
+    public var galleryPhotos: [DiaryPhoto] { photos.filter { !$0.removedFromGallery } }
+
+    /// ページに並べる順のままの参照。表示だけが要るところで使う
+    public var photoRefs: [String] { diaryPhotos.map(\.ref) }
+
+    /// この日のページに並ぶ写真の枚数。どの株の写真も数える。
+    /// **日記から外したものは数えない。**上限はページに並ぶ枚数に掛ける
+    public var photoCount: Int { diaryPhotos.count }
+
+    /// この日のページに、もう1枚足せるか
+    public var canAddPhoto: Bool { photoCount < Self.maxPhotosPerDay }
     public let author: Author
 
     /// 何も書かれず、写真も無い日。「お休み」として表示する
     public var isRest: Bool {
-        text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && photos.isEmpty
+        text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && diaryPhotos.isEmpty
     }
 
     public init(

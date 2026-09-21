@@ -69,16 +69,16 @@ struct GrowthSection: View {
                 scrollX = domain.upperBound.addingTimeInterval(-length)
                 range = newRange
             })
-        return Picker("表示する幅", selection: selection) {
-            ForEach(GrowthRange.allCases, id: \.self) { r in
-                Text(r.label).tag(r)
-            }
-        }
-        .pickerStyle(.segmented)
-        .padding(4)
-        // 帯は敷かない。グラフの上に浮かせ、タブバーと同じガラスで読めるようにする
-        .floatingGlass()
-        .padding(.horizontal)
+        return CapsuleTabBar(
+            selection: selection,
+            items: GrowthRange.allCases.map { r in
+                .init(r, title: r.label)
+            },
+            itemWidth: 50,
+            verticalPadding: 6,
+            fontSize: 12.5
+        )
+        // 帯は敷かない。グラフの上に浮かせ、タブバーのすぐ上に置く（D45）
         .padding(.vertical, 8)
     }
 
