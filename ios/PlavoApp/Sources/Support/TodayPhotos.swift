@@ -13,6 +13,9 @@ import SwiftUI
 ///
 /// **株はまたぐ。**今日撮ったものがすべて並ぶのが「今日の分」であり、
 /// 誰を撮ったかで分けるのはギャラリーの役（§4.4）。どの子かはキャプションで言う。
+///
+/// **ここで削除した写真は、日記からもギャラリーからも消える。**撮り損ねた1枚を捨てる場所で、
+/// 捨てればその株をもう1枚撮れる（1株3枚・D54）。
 struct TodayPhotosView: View {
 
     /// 古い順。左が古く、右が新しい（D46 と同じ並び）
@@ -27,6 +30,7 @@ struct TodayPhotosView: View {
     @State private var current: String = ""
     /// 下へ引いている量
     @State private var drag: CGFloat = 0
+    @State private var confirmDelete = false
 
     private static let dismissDistance: CGFloat = 90
 
@@ -119,14 +123,63 @@ struct TodayPhotosView: View {
     // MARK: - どの子か
 
     /// **日付は出さない。**並んでいるのは全部今日のものなので、何も言っていない。
-    /// 株はまたぐので、ここでは「どの子を撮ったか」だけが情報になる
+    /// 株はまたぐので、ここでは「どの子を撮ったか」だけが情報になる。
+    /// 右端に削除。ギャラリー（§4.4）と同じく、名前と同じ行に置く
     private var caption: some View {
-        Text(model.store.plant(photos.first { $0.ref == current }?.plantId)?.name ?? " ")
-            .font(.subheadline.weight(.semibold))
-            .foregroundStyle(.white)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 18)
-            .padding(.vertical, 10)
+        HStack(spacing: 8) {
+            Text(model.store.plant(photos.first { $0.ref == current }?.plantId)?.name ?? " ")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.white)
+            Spacer()
+            deleteButton
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 10)
+    }
+
+    // MARK: - 削除
+
+    /// 見ている1枚を削除する。**枠で囲まない。**ギャラリーと同じ赤い線のアイコンだけ
+    private var deleteButton: some View {
+        // 確認を出すところでは鳴らさない。確認は始まりであって結末ではない（haptics.md）
+        Button { confirmDelete = true } label: {
+            Image(systemName: "trash")
+                .font(.body)
+                .foregroundStyle(.red)
+                // 押せる広さは左へ取る
+                .frame(width: 32, height: 32, alignment: .trailing)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        // 押せる広さのぶん行を高くしない
+        .padding(.vertical, -6)
+        .accessibilityLabel("写真を削除")
+        .confirmationDialog(
+            "この写真を削除しますか？", isPresented: $confirmDelete, titleVisibility: .visible
+        ) {
+            Button("削除", role: .destructive) { deleteCurrent() }
+        } message: {
+            Text("日記とマイプラントの写真からも消えます")
+        }
+    }
+
+    /// 見ている1枚を消し、**隣の1枚へ移る。**右（新しい側）があればそちら、無ければ左。
+    /// 最後の1枚だったら閉じてカメラへ戻る
+    private func deleteCurrent() {
+        let before = photos
+        guard let i = before.firstIndex(where: { $0.ref == current }) else { return }
+        model.store.deletePhoto(current)
+        Haptics.thud()
+
+        let after = before.filter { $0.ref != current }
+        guard !after.isEmpty else {
+            onClose()
+            return
+        }
+        // 消えたページから送りのアニメーションで移ると、隣が滑り込んでくる途中が見える
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) { current = after[min(i, after.count - 1)].ref }
     }
 
     // MARK: - 小さい写真の列

@@ -10,8 +10,21 @@ import SwiftUI
 ///
 /// 動きは iPhone の写真アプリに合わせる（D46-a）。
 /// メインと列の見ている1枚は、写真の縦横比に関わらず形を固定する（D46-b）。
+///
+/// **パラパラでも同じ画面を使う。**違いは右下のボタンだけで、削除の代わりに再生を置く。
+/// 再生すると、写真をスライドさせずにその場で1枚ずつ切り替える。
+/// 毎日同じ角度で撮った写真がめくれていくので、パラパラ漫画のように育ちが見える。
 struct GalleryStripView: View {
-    let plantId: UUID
+    enum Kind {
+        /// 撮った写真の全部。右下は削除
+        case gallery
+        /// パラパラカメラで撮った写真だけ。右下は再生
+        case flipbook
+    }
+
+    /// どの株の写真か。**nil ならすべての写真**（プロフィール）
+    let plantId: UUID?
+    let kind: Kind
     /// メインに出している写真。グリッド・全画面と共有する。
     /// 戻るとき、ここにある写真のマスへ縮めるため
     @Binding var current: String
@@ -22,8 +35,27 @@ struct GalleryStripView: View {
     @State private var confirmDelete = false
     @Environment(\.dismiss) private var dismiss
 
+    /// パラパラを再生しているか
+    @State private var playing = false
+    @State private var playback: Task<Void, Never>?
+    /// 再生で送った先の写真。**これと違う写真に変わったら、指で送ったとみなして止める**
+    @State private var played: String?
+
+    /// パラパラの1枚を見せる時間。1秒に7枚ほど。
+    /// 遅いと1枚ずつの写真に見え、速いと育ちを追えない
+    private static let frameInterval: Duration = .milliseconds(150)
+
     /// 古い順。**渡されたものを持たず、その都度引く。**消したら並びから抜けるように
-    private var photos: [PlantPhoto] { model.store.photos(of: plantId).reversed() }
+    private var photos: [PlantPhoto] { Self.photos(of: plantId, kind: kind, in: model) }
+
+    private static func photos(of plantId: UUID?, kind: Kind, in model: AppModel) -> [PlantPhoto] {
+        let newestFirst: [PlantPhoto] =
+            switch kind {
+            case .gallery: plantId.map { model.store.photos(of: $0) } ?? model.store.allPhotos
+            case .flipbook: plantId.map { model.store.flipbookPhotos(of: $0) } ?? []
+            }
+        return newestFirst.reversed()
+    }
 
     /// 列の送り位置
     @State private var stripPosition: ScrollPosition
@@ -45,11 +77,12 @@ struct GalleryStripView: View {
     /// 細い写真1枚ぶんの送り幅
     private static var pitch: CGFloat { collapsedWidth + spacing }
 
-    init(plantId: UUID, current: Binding<String>, model: AppModel) {
+    init(plantId: UUID?, kind: Kind = .gallery, current: Binding<String>, model: AppModel) {
         self.plantId = plantId
+        self.kind = kind
         self._current = current
         self.model = model
-        let photos: [PlantPhoto] = model.store.photos(of: plantId).reversed()
+        let photos = Self.photos(of: plantId, kind: kind, in: model)
         let index = photos.firstIndex { $0.ref == current.wrappedValue } ?? 0
         _stripPosition = State(initialValue: ScrollPosition(x: Self.offset(centering: index)))
     }
@@ -65,8 +98,14 @@ struct GalleryStripView: View {
         // 列の1枚をタップしても、起きていることは同じ。
         //
         // **全画面では刻まない。**1枚だけを見るための場所で、
-        // 手応えを足すと見ることから注意が逸れる
-        .sensoryFeedback(.tick, trigger: current) { _, _ in !showFull }
+        // 手応えを足すと見ることから注意が逸れる。
+        // **再生中も刻まない。**1秒に7回鳴り続けることになる
+        .sensoryFeedback(.tick, trigger: current) { _, _ in !showFull && !playing }
+        // 再生中に指で送ったら止める。再生が送った先と違う写真になったら、指が動かしたもの
+        .onChange(of: current) { _, ref in
+            if playing, ref != played { stop() }
+        }
+        .onDisappear { stop() }
         .navigationBarTitleDisplayMode(.inline)
         .navigationDestination(isPresented: $showFull) {
             PhotoViewer(photos: photos, current: $current, model: model)
@@ -137,13 +176,22 @@ struct GalleryStripView: View {
             if let photo = photos.first(where: { $0.ref == current }) {
                 Text(format(photo.date))
                     .font(.subheadline.weight(.semibold))
-                if let day = photo.dayLabel {
+                // 株をまたいで並べるときは、何日目ではなくどの子かを言う。
+                // 「何日目」はページの主役のもので、写っている子のものとは限らない
+                if plantId == nil {
+                    if let name = model.store.plant(photo.plantId)?.name {
+                        Text(name).font(.subheadline).foregroundStyle(.secondary)
+                    }
+                } else if let day = photo.dayLabel {
                     Text("出会って\(day)")
                         .font(.subheadline).foregroundStyle(.secondary)
                 }
             }
             Spacer()
-            deleteButton
+            switch kind {
+            case .gallery: deleteButton
+            case .flipbook: playButton
+            }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
@@ -170,12 +218,65 @@ struct GalleryStripView: View {
         .padding(.vertical, -6)
         .accessibilityLabel("写真を削除")
         .confirmationDialog(
-            "この写真をギャラリーから削除しますか？", isPresented: $confirmDelete, titleVisibility: .visible
+            "この写真を削除しますか？", isPresented: $confirmDelete, titleVisibility: .visible
         ) {
-            Button("ギャラリーから削除", role: .destructive) { deleteCurrent() }
+            Button("削除", role: .destructive) { deleteCurrent() }
         } message: {
             Text("日記には残ります")
         }
+    }
+
+    // MARK: - パラパラ再生
+
+    /// 削除と同じ場所に、同じく枠なしで置く。色はアクセント色
+    private var playButton: some View {
+        Button {
+            if playing { stop() } else { play() }
+        } label: {
+            Image(systemName: playing ? "pause.fill" : "play.fill")
+                .font(.body)
+                .foregroundStyle(Color.accentColor)
+                .contentTransition(.symbolEffect(.replace))
+                .frame(width: 32, height: 32, alignment: .trailing)
+                .padding(.trailing, 8)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        // 押せる広さのぶん行を高くしない（削除と同じ）
+        .padding(.vertical, -6)
+        .disabled(photos.count < 2)
+        .accessibilityLabel(playing ? "止める" : "パラパラ再生")
+    }
+
+    /// いま見ている1枚から、新しい側へ1枚ずつめくる。**いちばん新しい1枚で止まる。**
+    /// いちばん新しい1枚を見ているときに押したら、いちばん古い1枚からめくる
+    private func play() {
+        guard photos.count > 1 else { return }
+        if index(of: current) >= photos.count - 1 { advance(to: photos[0].ref) }
+        playing = true
+        playback = Task { @MainActor in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: Self.frameInterval)
+                guard !Task.isCancelled else { return }
+                let next = index(of: current) + 1
+                guard next < photos.count else { break }
+                advance(to: photos[next].ref)
+            }
+            playing = false
+            playback = nil
+        }
+    }
+
+    /// **スライドさせずに、その場で切り替える。**パラパラ漫画は紙がめくれるのであって、流れない
+    private func advance(to ref: String) {
+        played = ref
+        switchInstantly(to: ref)
+    }
+
+    private func stop() {
+        playback?.cancel()
+        playback = nil
+        playing = false
     }
 
     // MARK: - 小さい写真の列

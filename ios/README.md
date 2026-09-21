@@ -116,7 +116,7 @@ xcrun simctl launch <device> dev.plavo.PlavoApp -startTab 2
 | 0 | カメラ |
 | 1 | マイプラント |
 | 2 | 日記 |
-| 3 | ルーム |
+| 3 | トーク |
 | 4 | プロフィール |
 
 マイプラントの詳細を直接開くこともできる（動作確認用）。
@@ -132,7 +132,7 @@ xcrun simctl launch <device> dev.plavo.PlavoApp -startTab 1 -openDetail YES -sta
 
 ### 実機が必要な部分
 
-**ARKit はシミュレータで動かない。**カメラタブは実機でしか確認できない。マイプラント・日記・ルーム・プロフィールはシミュレータで確認できる。
+**ARKit はシミュレータで動かない。**カメラタブは実機でしか確認できない。マイプラント・日記・トーク・プロフィールはシミュレータで確認できる。
 
 パネルの識別には**印刷したパネルの画像**が要る。AR Resource Group「PanelImages」に登録し、参照画像の名前を `content/dialogues/timeline.json` のパネルキーと一致させる。
 

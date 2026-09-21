@@ -1,91 +1,223 @@
+import PhotosUI
 import SwiftUI
 
 /// プロフィール（D13 / D20）。
 ///
+/// 上に自分（アイコン・名前・数）、その下に**すべての写真**を株で分けずに並べる。
+/// 並べ方は iPhone の写真アプリと同じで、株ごとのギャラリー（§4.4）と同じ作りを使う。
+///
+/// **それ以外は歯車の先（設定）に置く。**センサーやリセットは展示の運用のためのもので、
+/// 自分を見せる画面には出さない。
+///
 /// 将来はクローズドSNSのプロフィールになるが、今回はアカウントを作らない（D21）。
-/// 展示ではリセット操作の置き場としても使う（L-13）。
+/// アイコンと名前は端末の中だけで持ち、リセットで仮に戻る。
 struct MyPageTab: View {
     @Bindable var model: AppModel
-    @State private var showResetConfirm = false
+
+    /// 見ている写真。1枚を追う画面・全画面と共有する（D46）。
+    /// 戻るとき、この写真のマスへ縮めるため
+    @State private var focus = ""
+    @State private var showStrip = false
+    @Namespace private var zoom
+
+    /// 写真・動画の絞り込み。**nil ならすべて。**数を押すと絞り込み、もう一度押すと戻る
+    @State private var filter: MediaFilter?
+
+    enum MediaFilter: Hashable { case image, video }
+
+    /// アイコンに使う写真。選んだら切り抜き画面へ渡す
+    @State private var avatarItem: PhotosPickerItem?
+    @State private var cropTarget: PickedImage?
+    @State private var editingName = false
+    /// 入力中の名前。保存するまで本物には書かない
+    @State private var draftName = ""
 
     var body: some View {
         NavigationStack {
-            List {
-                Section("これまで") {
-                    LabeledContent("育てている植物", value: "\(model.store.livingCount)株")
-                    LabeledContent("一緒にいる日数", value: "\(model.store.longestDaysTogether)日")
-                    LabeledContent("見送った植物", value: "\(model.store.witheredCount)株")
-                    LabeledContent("書いた日記", value: "\(model.store.diary.count)件")
+            let photos = model.store.allPhotos
+            // **動画を撮る機能はまだ無い。**写真で絞っても中身は同じ、動画で絞るといつも空
+            let shown = filter == .video ? [] : photos
+            // 2本指で列の数が変わる（1・3・5・10・25列）。動きは写真アプリに合わせる
+            PhotoLibraryGrid(
+                photos: shown, model: model, focus: $focus, namespace: zoom,
+                onOpen: { photo in
+                    // 見ている写真を先に決めてから開く。拡大の起点をそのマスにするため
+                    focus = photo.ref
+                    showStrip = true
                 }
-
-                Section {
-                    LabeledContent("状態", value: model.sensor.state.label)
-                    LabeledContent("受信数", value: "\(model.sensor.receivedCount)")
-                    if let p = model.sensor.lastPayload {
-                        LabeledContent(
-                            "土の湿り",
-                            value: String(format: "%.1f%%  (raw %.0f)", p.soilMoisture.percent, p.soilMoisture.raw))
-                        LabeledContent("ガジェット", value: p.gadgetId)
-                    }
-                    HStack {
-                        Text("サーバー")
-                        TextField(
-                            "http://192.168.x.x:8787",
-                            text: Binding(
-                                get: { model.sensor.baseURL },
-                                set: { model.sensor.baseURL = $0 }))
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                            .multilineTextAlignment(.trailing)
-                            .font(.callout.monospaced())
-                    }
-                    Button(model.sensor.state == .idle ? "接続する" : "繋ぎ直す") {
-                        model.startSensor()
-                    }
-                } header: {
-                    Text("センサー")
-                } footer: {
-                    Text("起動時に自動で繋ぎにいきます。繋がらなくてもアプリは動きます。実センサーが無いときは、カメラ画面の長押しで出るモック操作を使ってください。")
-                }
-
-                Section {
-                    Button("次の来場者のためにリセット", role: .destructive) {
-                        showResetConfirm = true
-                    }
-                } header: {
-                    Text("展示")
-                } footer: {
-                    Text("この回の記録を消して、最初の状態に戻します。")
-                }
-
-                if let error = model.loadError {
-                    Section("読み込みエラー") {
-                        Text(error).font(.caption).foregroundStyle(.red)
-                    }
-                }
+            ) {
+                header(photoCount: photos.count)
+            } empty: {
+                empty
             }
             .navigationTitle("プロフィール")
             // 一番上の画面の見出しは細くする。日記に揃える（D56）
             .navigationBarTitleDisplayMode(.inline)
-            // 繋がったか、繋がらなかったか。**繋がらなくても体験は止まらない**（F-10）ので、
-            // 強くは鳴らさない
-            .sensoryFeedback(trigger: model.sensor.state) { _, state in
-                switch state {
-                case .connected: .tap
-                case .failed: .caution
-                default: nil
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    NavigationLink {
+                        SettingsView(model: model)
+                    } label: {
+                        Image(systemName: "gearshape")
+                    }
+                    .accessibilityLabel("設定")
                 }
             }
-            .confirmationDialog(
-                "リセットしますか", isPresented: $showResetConfirm, titleVisibility: .visible
-            ) {
-                Button("リセットする", role: .destructive) {
-                    // 来場者の記録が消える。展示の区切り
-                    Haptics.thud()
-                    model.reset()
+            // **グリッドの中ではなく、ここに置く。**lazy なコンテナの中に置くと無視される
+            .navigationDestination(isPresented: $showStrip) {
+                // グリッドは新しい順。1枚を追う画面は時間の流れで並べる（D46）
+                GalleryStripView(plantId: nil, current: $focus, model: model)
+                    // マスから拡大して開き、戻るときは**そのとき見ている写真の**マスへ縮む（D46-a）
+                    .navigationTransition(.zoom(sourceID: focus, in: zoom))
+            }
+            .onChange(of: avatarItem) { _, item in
+                guard let item else { return }
+                Task {
+                    guard let data = try? await item.loadTransferable(type: Data.self),
+                        let image = UIImage(data: data)
+                    else { return }
+                    await MainActor.run {
+                        // そのまま丸く切ると狙った場所が入らない。範囲を選ばせる（株のアイコンと同じ）
+                        cropTarget = PickedImage(image: image)
+                        avatarItem = nil
+                    }
                 }
-                Button("やめる", role: .cancel) {}
+            }
+            .sheet(item: $cropTarget) { picked in
+                AvatarCropView(image: picked.image) { data in
+                    model.store.setUserAvatar(data)
+                }
+            }
+            .alert("名前を変更", isPresented: $editingName) {
+                TextField("名前", text: $draftName)
+                Button("キャンセル", role: .cancel) {}
+                Button("保存") {
+                    // 空にはしない。消しただけなら元の名前のまま
+                    let name = draftName.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !name.isEmpty { model.store.userName = name }
+                }
+            }
+            // 絞り込みを変えた手応え。押して戻したときも同じ
+            .sensoryFeedback(.tick, trigger: filter)
+        }
+    }
+
+    // MARK: - 自分
+
+    private func header(photoCount: Int) -> some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(spacing: 14) {
+                // 押すとアイコンにする写真を選ぶ
+                PhotosPicker(selection: $avatarItem, matching: .images) {
+                    avatar
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("アイコンを変更")
+
+                // 鉛筆は名前に寄せる。押せる広さ（32pt）の余白だけ空く
+                HStack(spacing: 0) {
+                    Text(model.store.userName)
+                        .font(.title3.weight(.semibold))
+                        .lineLimit(1)
+                    Button {
+                        draftName = model.store.userName
+                        editingName = true
+                    } label: {
+                        Image(systemName: "pencil")
+                            .font(.body.weight(.medium))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 32, height: 32)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("名前を変更")
+                }
+                Spacer()
+            }
+            HStack(spacing: 0) {
+                // 写真と動画は押すと絞り込む
+                stat(photoCount, "写真", filter: .image)
+                // 動画を撮る機能はまだ無い
+                stat(0, "動画", filter: .video)
+                stat(model.store.diaryPostCount, "日記")
+                stat(model.store.livingCount, "育成中")
+                stat(model.store.witheredCount, "見送った")
             }
         }
+        .padding(.horizontal, 16)
+        .padding(.top, 8)
+        .padding(.bottom, 16)
+    }
+
+    /// 選んだ写真を丸く出す。無ければ人のかたち
+    private var avatar: some View {
+        Circle()
+            .fill(.quaternary)
+            .overlay {
+                if let ref = model.store.userAvatarRef,
+                    let image = model.store.thumbnail(ref, maxPixel: 200)
+                {
+                    Image(uiImage: image).resizable().scaledToFill()
+                } else {
+                    Image(systemName: "person.fill")
+                        .font(.system(size: 34))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .frame(width: 72, height: 72)
+            .clipShape(Circle())
+    }
+
+    /// 数を1つ。`filter` を渡したものは押せて、押すと絞り込む。
+    /// **絞り込んでいるものはアクセント色にする。**もう一度押すと戻る
+    @ViewBuilder
+    private func stat(_ value: Int, _ label: String, filter target: MediaFilter? = nil) -> some View {
+        let selected = target != nil && filter == target
+        let content = VStack(spacing: 2) {
+            Text("\(value)")
+                .font(.headline.monospacedDigit())
+                .foregroundStyle(selected ? Color.accentColor : .primary)
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(selected ? Color.accentColor : .secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .contentShape(Rectangle())
+
+        if let target {
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    filter = selected ? nil : target
+                }
+            } label: {
+                content
+            }
+            .buttonStyle(.plain)
+            .accessibilityAddTraits(selected ? .isSelected : [])
+        } else {
+            content
+        }
+    }
+
+    // 「写真がありません」とは書かない（原則3）
+    @ViewBuilder
+    private var empty: some View {
+        VStack(spacing: 12) {
+            if filter == .video {
+                Image(systemName: "video")
+                    .font(.system(size: 44))
+                    .foregroundStyle(.tertiary)
+                Text("まだ動画がありません").font(.headline)
+            } else {
+                Image(systemName: "photo.on.rectangle.angled")
+                    .font(.system(size: 44))
+                    .foregroundStyle(.tertiary)
+                Text("まだ写真がありません").font(.headline)
+                Text("カメラから撮ると、ここに集まります")
+                    .font(.subheadline).foregroundStyle(.secondary)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.top, 80)
     }
 }

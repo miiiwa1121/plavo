@@ -406,7 +406,7 @@ private struct DiaryCard: View {
         .confirmationDialog("この写真を日記から削除しますか？", isPresented: $confirmDelete, titleVisibility: .visible) {
             Button("日記から削除", role: .destructive) { deletePhoto() }
         } message: {
-            Text("ギャラリーには残ります")
+            Text("マイプラントの写真には残ります")
         }
     }
 

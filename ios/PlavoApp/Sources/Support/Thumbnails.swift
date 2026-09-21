@@ -39,6 +39,16 @@ final class ThumbnailCache {
         return made
     }
 
+    /// 覚えているものだけを返す。無ければ作らない
+    func cached(_ ref: String, maxPixel: CGFloat) -> UIImage? {
+        cache.object(forKey: "\(ref)@\(Int(maxPixel))" as NSString)
+    }
+
+    /// よそで作ったものを覚える（`PlantStore.thumbnailInBackground`）
+    func remember(_ image: UIImage, for ref: String, maxPixel: CGFloat) {
+        cache.setObject(image, forKey: "\(ref)@\(Int(maxPixel))" as NSString, cost: Self.bytes(of: image))
+    }
+
     /// 覚えているものを全部捨てる。リセット（D33）で呼ぶ
     func removeAll() { cache.removeAllObjects() }
 
@@ -48,7 +58,8 @@ final class ThumbnailCache {
         return cgImage.bytesPerRow * cgImage.height
     }
 
-    private static func downsample(_ data: Data, maxPixel: CGFloat) -> UIImage? {
+    /// 縮めて開く。**画面の仕事を止めないよう、裏で呼べる**（状態を持たない）
+    nonisolated static func downsample(_ data: Data, maxPixel: CGFloat) -> UIImage? {
         let sourceOptions = [kCGImageSourceShouldCache: false] as CFDictionary
         guard let source = CGImageSourceCreateWithData(data as CFData, sourceOptions) else {
             return nil

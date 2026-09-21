@@ -24,20 +24,31 @@ struct RootView: View {
 
     var body: some View {
         TabView(selection: $selection) {
-            Tab("カメラ", systemImage: "camera.viewfinder", value: 0) {
+            // タブバーはアイコンだけにする。名前は読み上げのために残す
+            Tab(value: 0) {
                 CameraTab(model: model)
+            } label: {
+                Label("カメラ", systemImage: "camera.viewfinder").labelStyle(.iconOnly)
             }
-            Tab("マイプラント", systemImage: "leaf", value: 1) {
+            Tab(value: 1) {
                 MyPlantTab(model: model)
+            } label: {
+                Label("マイプラント", systemImage: "leaf").labelStyle(.iconOnly)
             }
-            Tab("日記", systemImage: "book", value: 2) {
+            Tab(value: 2) {
                 DiaryTab(model: model)
+            } label: {
+                Label("日記", systemImage: "book").labelStyle(.iconOnly)
             }
-            Tab("ルーム", systemImage: "square.grid.2x2", value: 3) {
-                RoomTab()
+            Tab(value: 3) {
+                TalkTab()
+            } label: {
+                Label("トーク", systemImage: "bubble.left.and.bubble.right").labelStyle(.iconOnly)
             }
-            Tab("プロフィール", systemImage: "person", value: 4) {
+            Tab(value: 4) {
                 MyPageTab(model: model)
+            } label: {
+                Label("プロフィール", systemImage: "person").labelStyle(.iconOnly)
             }
         }
         // 起動したら自動でセンサーに繋ぎにいく。

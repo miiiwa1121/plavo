@@ -1,24 +1,24 @@
 import SwiftUI
 
-/// ルーム（D16）。正方形の3D空間に、育てた植物や集めたものを並べる。
+/// トーク（D57 / D57-a）。一緒に育てている家族と育成の様子を分かち合い、
+/// 植物を育てる人どうしでつながる場所。ルーム（D16）に代わる。
 ///
-/// RealityKit で実装する（D16-a）が、今回の実装スコープからは外している（D21）。
-/// 3Dアセットの調達がボトルネックになるため（L-7）。枠だけ残す。
-struct RoomTab: View {
+/// 中身はまだ決めていない。データのやり取りは将来に回し、いまは枠だけ置く。
+struct TalkTab: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 14) {
-                Image(systemName: "cube.transparent")
+                Image(systemName: "bubble.left.and.bubble.right")
                     .font(.system(size: 48))
                     .foregroundStyle(.tertiary)
                 Text("準備中")
                     .font(.headline)
-                Text("育てた植物や集めたものを並べる\n自分だけの部屋になります")
+                Text("一緒に育てている家族と様子を分かち合い\n植物を育てる仲間とつながる場所になります")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
             }
-            .navigationTitle("ルーム")
+            .navigationTitle("トーク")
             // 一番上の画面の見出しは細くする。日記に揃える（D56）
             .navigationBarTitleDisplayMode(.inline)
         }

@@ -6,6 +6,10 @@ import SwiftUI
 /// 左右にスライドして切り替える。**今後も種類が増えていく前提**なので、
 /// 数に依らず並べられる形にしてある。
 enum ShutterMode: String, CaseIterable, Identifiable {
+    /// パラパラカメラ。前回のパラパラの1枚を薄く重ね、同じ角度で撮る。1日・1株につき1枚。
+    ///
+    /// **「撮る」の左に置く。**「撮る」から右へ「迎える」という、これまでの滑らせ方を変えないため
+    case flipbook
     /// いつもの撮影。今日の日記に写真が入る
     case capture
     /// 植物を迎える。撮った1枚で確かめてから登録する
@@ -15,6 +19,7 @@ enum ShutterMode: String, CaseIterable, Identifiable {
 
     var label: String {
         switch self {
+        case .flipbook: "パラパラ"
         case .capture: "撮る"
         case .addPlant: "迎える"
         }
@@ -23,6 +28,8 @@ enum ShutterMode: String, CaseIterable, Identifiable {
     /// 中に描く記号。なければ無地のシャッター
     var symbol: String? {
         switch self {
+        // 2枚が重なった形。前回の1枚に重ねて撮ることを表す
+        case .flipbook: "square.on.square"
         case .capture: nil
         case .addPlant: "plus"
         }

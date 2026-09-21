@@ -156,18 +156,32 @@ public struct DiaryPhoto: Codable, Sendable, Equatable, Hashable, Identifiable {
     public var removedFromDiary: Bool
     /// ギャラリーから外したか。**外しても日記には残る**
     public var removedFromGallery: Bool
+    /// カメラで撮ったか。**撮影の上限（`DiaryEntry.maxShotsPerPlantPerDay`）はこれだけを数える。**
+    /// 日記の「+」で足した写真は撮影ではない
+    public var fromCamera: Bool
+    /// パラパラカメラで撮ったか。
+    ///
+    /// **パラパラの写真は、ほかの枚数に数えない。**撮影の3枚にも、日記の10枚にも入らない。
+    /// 日記のページにも並べない（パラパラとギャラリーに並ぶ）。
+    /// 毎日同じ角度で1枚ずつ撮り、パラパラ漫画のように育ちを見るためのもの
+    public var flipbook: Bool
 
     public var id: String { ref }
 
     /// 両方から外した。もうどこにも並ばないので、実体を手放してよい
     public var isUnused: Bool { removedFromDiary && removedFromGallery }
 
+    /// 日記のページに並ぶか。日記から外したものと、パラパラの写真は並ばない
+    public var isInDiary: Bool { !removedFromDiary && !flipbook }
+
     public init(
-        ref: String, plantId: UUID? = nil,
+        ref: String, plantId: UUID? = nil, fromCamera: Bool = false, flipbook: Bool = false,
         removedFromDiary: Bool = false, removedFromGallery: Bool = false
     ) {
         self.ref = ref
         self.plantId = plantId
+        self.fromCamera = fromCamera
+        self.flipbook = flipbook
         self.removedFromDiary = removedFromDiary
         self.removedFromGallery = removedFromGallery
     }
@@ -175,11 +189,23 @@ public struct DiaryPhoto: Codable, Sendable, Equatable, Hashable, Identifiable {
 
 public struct DiaryEntry: Codable, Sendable, Identifiable, Equatable {
 
-    /// 1日に日記へ足せる写真の上限。**ページ全体で数える。株では分けない。**
+    /// 1日に日記へ載せられる写真の上限。**ページ全体で数える。株では分けない。**
+    /// カメラで撮った写真も、日記の「+」で足した写真も数える。
     ///
     /// 日記は1日1ページで、その日に撮った写真はどの株のものでもそのページに入る。
     /// 多すぎると1日が冗長になり、少なすぎると記録しきれない。
     public static let maxPhotosPerDay = 10
+
+    /// 1日に1株をカメラで撮れる枚数（D54）。**撮影にだけ掛ける。**
+    /// 日記の「+」で足した写真は数えない。ページ全体の上限（`maxPhotosPerDay`）とは別に効く。
+    ///
+    /// **撮った写真の合計で数える。**日記やギャラリーから外しても、写真が残っていれば枠は戻らない。
+    /// 写真そのものを削除したとき（直近の写真・D42-a）に1枠戻る
+    public static let maxShotsPerPlantPerDay = 3
+
+    /// 1日に1株をパラパラカメラで撮れる枚数。**ほかの上限とは別に数える**
+    public static let maxFlipbookPerPlantPerDay = 1
+
     public enum Author: String, Codable, Sendable {
         /// ユーザー本人が書いた
         case user
@@ -199,7 +225,7 @@ public struct DiaryEntry: Codable, Sendable, Identifiable, Equatable {
     /// そのとき植物が言ったこと。引用として添える
     public var quotedDialogue: String?
     /// その日に撮った写真。**どの株を撮ったかを1枚ずつ持つ**（D54）。ギャラリーを株で分けるため。
-    /// 上限はページ全体で DiaryEntry.maxPhotosPerDay。
+    /// 上限はページ全体で DiaryEntry.maxPhotosPerDay。撮影は別に、1株につき maxShotsPerPlantPerDay。
     /// 実体は PlantStore が持つ。ここでは識別子だけを扱い、
     /// ドメインのモデルに画像データを持ち込まない。
     ///
@@ -207,8 +233,8 @@ public struct DiaryEntry: Codable, Sendable, Identifiable, Equatable {
     /// ページに並べるのは `diaryPhotos`、ギャラリーに並べるのは `galleryPhotos`
     public var photos: [DiaryPhoto]
 
-    /// ページに並べる写真。日記から外したものを除く
-    public var diaryPhotos: [DiaryPhoto] { photos.filter { !$0.removedFromDiary } }
+    /// ページに並べる写真。日記から外したものと、パラパラの写真を除く
+    public var diaryPhotos: [DiaryPhoto] { photos.filter(\.isInDiary) }
 
     /// ギャラリーに並べる写真。ギャラリーから外したものを除く
     public var galleryPhotos: [DiaryPhoto] { photos.filter { !$0.removedFromGallery } }
@@ -222,6 +248,29 @@ public struct DiaryEntry: Codable, Sendable, Identifiable, Equatable {
 
     /// この日のページに、もう1枚足せるか
     public var canAddPhoto: Bool { photoCount < Self.maxPhotosPerDay }
+
+    /// この日にカメラでその株を撮った枚数。
+    /// **日記やギャラリーから外したものも数える。**どこにも並ばなくなったもの（削除）だけを除く。
+    /// パラパラの写真は数えない
+    public func shotCount(of plantId: UUID) -> Int {
+        photos.filter { $0.fromCamera && !$0.flipbook && $0.plantId == plantId && !$0.isUnused }
+            .count
+    }
+
+    /// この日、その株をもう1枚撮れるか。ページ全体の上限は別に見る（`canAddPhoto`）
+    public func canShoot(_ plantId: UUID) -> Bool {
+        shotCount(of: plantId) < Self.maxShotsPerPlantPerDay
+    }
+
+    /// この日にパラパラカメラでその株を撮った枚数。削除したものだけを除く
+    public func flipbookCount(of plantId: UUID) -> Int {
+        photos.filter { $0.flipbook && $0.plantId == plantId && !$0.isUnused }.count
+    }
+
+    /// この日、その株をパラパラカメラで撮れるか
+    public func canShootFlipbook(_ plantId: UUID) -> Bool {
+        flipbookCount(of: plantId) < Self.maxFlipbookPerPlantPerDay
+    }
     public let author: Author
 
     /// 何も書かれず、写真も無い日。「お休み」として表示する

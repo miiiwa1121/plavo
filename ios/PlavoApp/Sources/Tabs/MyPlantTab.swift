@@ -43,7 +43,7 @@ struct MyPlantTab: View {
                     let first = model.store.plants.first?.id
                 else { return }
                 let page = UserDefaults.standard.integer(forKey: "startDetailPage")
-                launchPage = (0...2).contains(page) ? page : 0
+                launchPage = (0...3).contains(page) ? page : 0
                 path = [first]
             }
             .onChange(of: path) { _, path in
@@ -187,6 +187,11 @@ struct PlantDetailView: View {
     @State private var galleryFocus = ""
     @State private var showGalleryStrip = false
     @Namespace private var galleryZoom
+    /// パラパラで見ている写真。ギャラリーとは別に持つ。**同じ写真が両方に並ぶ**ので、
+    /// 拡大の起点を取り違えないよう名前空間も分ける
+    @State private var flipbookFocus = ""
+    @State private var showFlipbookStrip = false
+    @Namespace private var flipbookZoom
     @Environment(\.dismiss) private var dismiss
 
     private var plant: Plant? { model.store.plant(plantId) }
@@ -220,6 +225,8 @@ struct PlantDetailView: View {
                     .tag(1)
                 pageContent(gallery, top: top, bottom: bottom)
                     .tag(2)
+                pageContent(flipbook, top: top, bottom: bottom)
+                    .tag(3)
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
             .ignoresSafeArea()
@@ -229,7 +236,8 @@ struct PlantDetailView: View {
                     items: [
                         .init(0, title: "記録"),
                         .init(1, title: "育成"),
-                        .init(2, title: "ギャラリー"),
+                        .init(2, title: "写真"),
+                        .init(3, title: "パラパラ"),
                     ],
                     itemWidth: 78
                 )
@@ -259,6 +267,11 @@ struct PlantDetailView: View {
             GalleryStripView(plantId: plantId, current: $galleryFocus, model: model)
             // マスから拡大して開き、戻るときは**そのとき見ている写真の**マスへ縮む（D46-a）
             .navigationTransition(.zoom(sourceID: galleryFocus, in: galleryZoom))
+        }
+        .navigationDestination(isPresented: $showFlipbookStrip) {
+            // 作りはギャラリーと同じ。右下が削除ではなく再生になる
+            GalleryStripView(plantId: plantId, kind: .flipbook, current: $flipbookFocus, model: model)
+                .navigationTransition(.zoom(sourceID: flipbookFocus, in: flipbookZoom))
         }
         .onChange(of: avatarItem) { _, item in
             guard let item else { return }
@@ -447,20 +460,45 @@ struct PlantDetailView: View {
     ///
     /// 日記が「その日に何があったか」なのに対し、ここは「この子がどう育ったか」。
     /// 目的が違うので、日記を植物で絞り込んだものにはしない（§4.4）。
-    @ViewBuilder
+    ///
+    /// **撮った写真の全部が並ぶ。**パラパラカメラで撮った1枚もここに入る
     private var gallery: some View {
-        let photos = model.store.photos(of: plantId)
-        if photos.isEmpty {
+        photoGrid(
+            model.store.photos(of: plantId), focus: $galleryFocus, show: $showGalleryStrip,
+            zoom: galleryZoom
+        ) {
             // 「写真がありません」とは書かない（原則3）
-            VStack(spacing: 12) {
-                Image(systemName: "photo.on.rectangle.angled")
-                    .font(.system(size: 44))
-                    .foregroundStyle(.tertiary)
-                Text("まだ写真がありません").font(.headline)
-                Text("カメラから撮ると、ここに集まります")
-                    .font(.subheadline).foregroundStyle(.secondary)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            emptyPhotos(
+                symbol: "photo.on.rectangle.angled", title: "まだ写真がありません",
+                message: "カメラから撮ると、ここに集まります")
+        }
+    }
+
+    // MARK: - パラパラ
+
+    /// パラパラカメラで撮った写真だけを並べる。作りはギャラリーと同じ。
+    ///
+    /// 毎日同じ角度で1枚ずつ撮ったものなので、開いて再生すると
+    /// パラパラ漫画のように育ちが見える
+    private var flipbook: some View {
+        photoGrid(
+            model.store.flipbookPhotos(of: plantId), focus: $flipbookFocus,
+            show: $showFlipbookStrip, zoom: flipbookZoom
+        ) {
+            emptyPhotos(
+                symbol: "square.on.square", title: "まだパラパラがありません",
+                message: "カメラの「パラパラ」で毎日同じ角度から撮ると\nここに集まります")
+        }
+    }
+
+    /// ギャラリーとパラパラの3列。新しい順
+    @ViewBuilder
+    private func photoGrid<Empty: View>(
+        _ photos: [PlantPhoto], focus: Binding<String>, show: Binding<Bool>, zoom: Namespace.ID,
+        @ViewBuilder empty: () -> Empty
+    ) -> some View {
+        if photos.isEmpty {
+            empty()
         } else {
             ScrollViewReader { proxy in
                 ScrollView {
@@ -471,22 +509,35 @@ struct PlantDetailView: View {
                         ForEach(photos, id: \.ref) { photo in
                             // 見ている写真を先に決めてから開く。拡大の起点をそのマスにするため
                             Button {
-                                galleryFocus = photo.ref
-                                showGalleryStrip = true
+                                focus.wrappedValue = photo.ref
+                                show.wrappedValue = true
                             } label: {
                                 GalleryTile(ref: photo.ref, date: photo.date, model: model)
                             }
                             .buttonStyle(.plain)
-                            .matchedTransitionSource(id: photo.ref, in: galleryZoom)
+                            .matchedTransitionSource(id: photo.ref, in: zoom)
                             .id(photo.ref)
                         }
                     }
                 }
                 // 先の画面で写真を変えたら、戻る先のマスが見える位置まで送っておく。
                 // 見えていないマスには縮んで戻れない
-                .onChange(of: galleryFocus) { _, ref in proxy.scrollTo(ref) }
+                .onChange(of: focus.wrappedValue) { _, ref in proxy.scrollTo(ref) }
             }
         }
+    }
+
+    private func emptyPhotos(symbol: String, title: String, message: String) -> some View {
+        VStack(spacing: 12) {
+            Image(systemName: symbol)
+                .font(.system(size: 44))
+                .foregroundStyle(.tertiary)
+            Text(title).font(.headline)
+            Text(message)
+                .font(.subheadline).foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private func reached(_ stage: GrowthStage) -> Bool {

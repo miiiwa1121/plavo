@@ -109,6 +109,26 @@ enum PlaceholderPhotos {
         return data
     }
 
+    /// パラパラの1枚。**毎日同じ角度・同じ大きさで撮った体にする。**
+    /// 縦横比も構図も日で変えない。変えると、めくったときに鉢が跳ねて、育ちが見えなくなる
+    static func flipbookJPEG(day: Int, stage: GrowthStage, thirsty: Bool, look: Look) -> Data {
+        let key = "flip-\(look.id)-\(day)-\(stage.rawValue)-\(thirsty)"
+        if let cached = cache[key] { return cached }
+
+        // 日ごとに描くので枚数が多い。**小さめに描いて、起動を重くしない**
+        let size = CGSize(width: 600, height: 800)
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let image = UIGraphicsImageRenderer(size: size, format: format).image { context in
+            draw(
+                context.cgContext, size: size, day: day, stage: stage,
+                thirsty: thirsty, shot: 0, look: look)
+        }
+        let data = image.jpegData(compressionQuality: 0.8) ?? Data()
+        cache[key] = data
+        return data
+    }
+
     /// 縦長を基本に、正方形と横長を混ぜる。ギャラリーの切り抜きとメインの余白を確かめられるように
     private static func size(day: Int, shot: Int) -> CGSize {
         switch (day + shot) % 5 {

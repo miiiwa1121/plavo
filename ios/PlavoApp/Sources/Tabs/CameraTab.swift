@@ -69,6 +69,11 @@ struct CameraTab: View {
                     }
                     .animation(.easeInOut(duration: 0.3), value: unassigned)
 
+                // パラパラカメラ。前回の1枚を薄く重ねる。
+                // **ここだけに動きを掛ける。**切り替えそのものの動きはシャッターの側が持つ
+                ZStack { flipbookGuide }
+                    .animation(.easeInOut(duration: 0.22), value: shutterMode == .flipbook)
+
                 if let center = scene.bubbleScreenPoint, let target = scene.plantScreenPoint,
                     !line.isEmpty
                 {
@@ -295,7 +300,7 @@ struct CameraTab: View {
                 onFire: { Task { await fire() } },
                 disabled: scene.isCapturing,
                 // **「迎える」は塞がない。**未設定から出る道がそこにある
-                blocked: unassigned ? [.capture] : []
+                blocked: unassigned ? [.capture, .flipbook] : []
             )
             .padding(.bottom, 28)
         }
@@ -362,6 +367,7 @@ struct CameraTab: View {
 
     private func fire() async {
         switch shutterMode {
+        case .flipbook: await captureFlipbook()
         case .capture: await capture()
         case .addPlant: await captureForAdd()
         }
@@ -422,9 +428,16 @@ struct CameraTab: View {
         model.store.attachPlantToToday(plantId)
 
         guard let today = model.store.todayEntry() else { return }
-        // 上限はその日のページ全体。どの株を撮った写真も数える
+        // 撮影は1株につき3枚（D54）。どの株が満ちたのかが分かるように名前を添える
+        let name = model.store.plant(plantId)?.name ?? "この子"
+        guard today.canShoot(plantId) else {
+            captureNotice = "\(name)は今日もう\(DiaryEntry.maxShotsPerPlantPerDay)枚撮りました"
+            Haptics.caution()
+            return
+        }
+        // 日記のページ全体にも上限がある。「+」で足した写真も、ほかの株の写真も数える
         guard today.canAddPhoto else {
-            captureNotice = "今日はもう\(DiaryEntry.maxPhotosPerDay)枚あります"
+            captureNotice = "今日の日記はもう\(DiaryEntry.maxPhotosPerDay)枚あります"
             Haptics.caution()
             return
         }
@@ -439,9 +452,66 @@ struct CameraTab: View {
             return
         }
         Haptics.snap()
-        model.store.addPhoto(data, to: today.id, of: plantId)
-        let count = model.store.todayEntry()?.photoCount ?? 0
-        captureNotice = "日記に追加しました（\(count)/\(DiaryEntry.maxPhotosPerDay)）"
+        model.store.addPhoto(data, to: today.id, of: plantId, fromCamera: true)
+        let count = model.store.todayEntry()?.shotCount(of: plantId) ?? 0
+        captureNotice = "日記に追加しました（\(name) \(count)/\(DiaryEntry.maxShotsPerPlantPerDay)）"
+    }
+
+    // MARK: - パラパラ
+
+    /// 前回のパラパラの1枚を、映像に薄く重ねる。
+    ///
+    /// **映像と同じ切り抜きで重ねる。**映像は画面いっぱいに切り抜いて映しているので、
+    /// 撮った1枚も同じく画面いっぱいに切り抜けば、鉢の位置と大きさが映像と重なる。
+    /// 重なるように構えれば、前回と同じ角度で撮れる。
+    ///
+    /// まだ1枚も撮っていない株では何も重ねない（その日の1枚が、次の日の目安になる）
+    @ViewBuilder
+    private var flipbookGuide: some View {
+        if shutterMode == .flipbook, let plantId = model.store.selectedPlantId,
+            let ref = model.store.latestFlipbookRef(of: plantId),
+            let image = model.store.thumbnail(ref, maxPixel: 1200)
+        {
+            GeometryReader { proxy in
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: proxy.size.width, height: proxy.size.height)
+                    .clipped()
+            }
+            .ignoresSafeArea()
+            .opacity(0.35)
+            .allowsHitTesting(false)
+            .transition(.opacity)
+        }
+    }
+
+    /// パラパラの1枚を撮る。**1日・1株につき1枚。**撮影の3枚にも日記の10枚にも数えない
+    private func captureFlipbook() async {
+        guard let plantId = model.store.selectedPlantId else {
+            captureNotice = "先に「迎える」で迎えてね"
+            Haptics.caution()
+            return
+        }
+        model.store.ensureTodayPage()
+        guard let today = model.store.todayEntry() else { return }
+        let name = model.store.plant(plantId)?.name ?? "この子"
+        guard today.canShootFlipbook(plantId) else {
+            captureNotice = "\(name)のパラパラは今日もう撮りました"
+            Haptics.caution()
+            return
+        }
+
+        // 受け取ったこと（tap）と、撮れたこと（snap）を分ける（撮るときと同じ）
+        Haptics.tap()
+        guard let data = await scene.capturePhoto() else {
+            captureNotice = "撮れませんでした"
+            Haptics.caution()
+            return
+        }
+        Haptics.snap()
+        model.store.addFlipbookPhoto(data, to: today.id, of: plantId)
+        captureNotice = "パラパラに追加しました（\(name)）"
     }
 
     // MARK: - 重ねる表示
