@@ -36,7 +36,12 @@ enum ShutterMode: String, CaseIterable, Identifiable {
 struct ShutterBar: View {
     @Binding var mode: ShutterMode
     let onFire: () -> Void
+    /// 撮影中など、いまは押しても始められない
     var disabled = false
+    /// **いまは使えない種類。**斜線を入れて、押せないことを形で示す。
+    ///
+    /// 薄くするだけでは「暗いところに居る」との区別が付かない
+    var blocked: Set<ShutterMode> = []
 
     private let bigSize: CGFloat = 72
     private let smallSize: CGFloat = 42
@@ -83,6 +88,7 @@ struct ShutterBar: View {
     private func button(_ m: ShutterMode) -> some View {
         let selected = m == mode
         let size = selected ? bigSize : smallSize
+        let unavailable = blocked.contains(m)
         return Button {
             if selected {
                 // 押した手応えと撮れた手応えは、撮る側（CameraTab）が返す。
@@ -104,12 +110,24 @@ struct ShutterBar: View {
                         .font(.system(size: symbolSize, weight: .bold))
                         .blendMode(.destinationOut)
                 }
+                if unavailable {
+                    // 斜線もくり抜く。記号と同じ描きかたに揃える。
+                    // **図形で描く。**文字だと選択の切り替えごとに組み直されて揺れる。
+                    //
+                    // **ボタンの端から端まで引く。**中に収めると「記号が入っている」に
+                    // 見えて、押せないことが伝わらない。縁の輪も断ち切る
+                    Capsule()
+                        .fill(.white)
+                        .frame(width: size, height: selected ? 5 : 3.5)
+                        .rotationEffect(.degrees(-45))
+                        .blendMode(.destinationOut)
+                }
             }
             // くり抜きを効かせるために、この重なりを一度まとめて描く
             .compositingGroup()
             .frame(width: size, height: size)
         }
-        .disabled(disabled && selected)
+        .disabled(unavailable || (disabled && selected))
         .opacity(disabled && selected ? 0.5 : 1)
     }
 

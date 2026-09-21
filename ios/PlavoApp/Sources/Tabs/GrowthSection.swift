@@ -28,11 +28,13 @@ struct GrowthSection: View {
             let visible = range.visibleLength(dataSpan: domain.upperBound.timeIntervalSince(domain.lowerBound))
             let bucket = MetricAggregation.bucket(forVisibleLength: visible)
             let withered = model.store.stage(of: plantId) == .withered
+            // 適正範囲は**株ごと**に引く。仕込みの株が2種類になった（D53）
+            let profile = model.profile(for: model.store.plant(plantId))
 
             ScrollView {
                 VStack(spacing: 12) {
                     ForEach(items, id: \.0.id) { definition, s in
-                        let range = model.profile.range(for: definition.id)
+                        let range = profile.range(for: definition.id)
                         MetricCard(
                             definition: definition,
                             series: s,

@@ -15,28 +15,94 @@ enum PlaceholderPhotos {
     /// リセットのたびに描き直さない
     private static var cache: [String: Data] = [:]
 
-    /// その日に撮ったことにする枚数。
-    /// 開花の日と、日記に「写真ばかり撮っている」とある50日目は多めにする
-    static func shots(onDay day: Int) -> Int {
-        switch day {
-        case 50: 3
-        case 45: 2
-        default: 1
-        }
+    struct Rgb: Hashable {
+        let r: CGFloat
+        let g: CGFloat
+        let b: CGFloat
+        var cg: CGColor { CGColor(red: r, green: g, blue: b, alpha: 1) }
+    }
+
+    /// 株ごとの見た目と、育ちの節目（D53）。
+    ///
+    /// **日数の判定を株ごとに持つ。**以前はひまりの日数（70日目から茶色、
+    /// 74日目から葉が落ちる…）が直接書かれていたため、**こすもの90日目が
+    /// 枯れかけに描かれていた。**
+    struct Look: Hashable {
+        let id: String
+        /// 花びら
+        let petal: Rgb
+        /// 褪せてきた花びら
+        let fadedPetal: Rgb
+        let flowerCenter: Rgb
+        let petalCount: Int
+        /// 花の大きさ（短辺に対する割合）
+        let flowerRadius: CGFloat
+        /// 結実の花と中心
+        let seedPetal: Rgb
+        let seedCenter: Rgb
+        /// 背丈の伸び。この日から数えて、この日数で伸びきる
+        let growthFrom: Int
+        let growthSpan: Int
+        /// 葉の対。この日から数えて、この日数ごとに1対増える
+        let leafFrom: Int
+        let leafEvery: Int
+        /// 花びらが褪せ始める日。無ければ褪せない
+        let fadingFrom: Int?
+        /// 下の葉が黄ばみ始める日
+        let yellowingFrom: Int?
+        /// 茎が乾き始める日
+        let dryingFrom: Int?
+        /// 葉が落ちて2対だけになる日
+        let sheddingFrom: Int?
+        /// 結実の花びらが落ちきる日
+        let baldFrom: Int?
+
+        /// ミニひまわり（ひまり）。黄色い大輪
+        static let sunflower = Look(
+            id: "sunflower",
+            petal: Rgb(r: 0.98, g: 0.78, b: 0.15),
+            fadedPetal: Rgb(r: 0.93, g: 0.80, b: 0.40),
+            flowerCenter: Rgb(r: 0.40, g: 0.25, b: 0.12),
+            petalCount: 14,
+            flowerRadius: 0.1,
+            seedPetal: Rgb(r: 0.85, g: 0.70, b: 0.30),
+            seedCenter: Rgb(r: 0.30, g: 0.20, b: 0.10),
+            growthFrom: 5, growthSpan: 40,
+            leafFrom: 8, leafEvery: 5,
+            fadingFrom: 55, yellowingFrom: 58, dryingFrom: 70,
+            sheddingFrom: 74, baldFrom: 66)
+
+        /// コスモス（こすも）。**桃色の8枚花、まんなかは黄色。**
+        /// まだ咲いているので、褪せ・黄ばみ・乾きの日は持たない
+        static let cosmos = Look(
+            id: "cosmos",
+            petal: Rgb(r: 0.96, g: 0.60, b: 0.74),
+            fadedPetal: Rgb(r: 0.96, g: 0.78, b: 0.84),
+            flowerCenter: Rgb(r: 0.98, g: 0.84, b: 0.35),
+            petalCount: 8,
+            flowerRadius: 0.075,
+            seedPetal: Rgb(r: 0.90, g: 0.72, b: 0.78),
+            seedCenter: Rgb(r: 0.80, g: 0.66, b: 0.30),
+            growthFrom: 6, growthSpan: 68,
+            leafFrom: 9, leafEvery: 10,
+            fadingFrom: nil, yellowingFrom: nil, dryingFrom: nil,
+            sheddingFrom: nil, baldFrom: nil)
     }
 
     /// - Parameters:
     ///   - thirsty: 水切れの日。葉を垂らす
     ///   - shot: その日の何枚目か。構図と縦横比を変える
-    static func jpeg(day: Int, stage: GrowthStage, thirsty: Bool, shot: Int) -> Data {
-        let key = "\(day)-\(shot)-\(stage.rawValue)-\(thirsty)"
+    static func jpeg(day: Int, stage: GrowthStage, thirsty: Bool, shot: Int, look: Look) -> Data {
+        let key = "\(look.id)-\(day)-\(shot)-\(stage.rawValue)-\(thirsty)"
         if let cached = cache[key] { return cached }
 
         let size = size(day: day, shot: shot)
         let format = UIGraphicsImageRendererFormat()
         format.scale = 1
         let image = UIGraphicsImageRenderer(size: size, format: format).image { context in
-            draw(context.cgContext, size: size, day: day, stage: stage, thirsty: thirsty, shot: shot)
+            draw(
+                context.cgContext, size: size, day: day, stage: stage,
+                thirsty: thirsty, shot: shot, look: look)
         }
         let data = image.jpegData(compressionQuality: 0.8) ?? Data()
         cache[key] = data
@@ -55,7 +121,8 @@ enum PlaceholderPhotos {
     // MARK: - 描画
 
     private static func draw(
-        _ c: CGContext, size: CGSize, day: Int, stage: GrowthStage, thirsty: Bool, shot: Int
+        _ c: CGContext, size: CGSize, day: Int, stage: GrowthStage, thirsty: Bool, shot: Int,
+        look: Look
     ) {
         let w = size.width
         let h = size.height
@@ -100,18 +167,22 @@ enum PlaceholderPhotos {
         c.fillEllipse(in: CGRect(x: cx - topWidth / 2 + u * 0.01, y: potTop - u * 0.025, width: topWidth - u * 0.02, height: u * 0.035))
 
         if stage != .seed {
-            drawPlant(c, u: u, base: CGPoint(x: cx, y: potTop - u * 0.015), ceiling: square.minY + u * 0.14, day: day, stage: stage, thirsty: thirsty)
+            drawPlant(
+                c, u: u, base: CGPoint(x: cx, y: potTop - u * 0.015),
+                ceiling: square.minY + u * 0.14, day: day, stage: stage,
+                thirsty: thirsty, look: look)
         }
         drawBadge(day: day, u: u, origin: CGPoint(x: square.minX + u * 0.04, y: square.minY + u * 0.04))
     }
 
     private static func drawPlant(
-        _ c: CGContext, u: CGFloat, base: CGPoint, ceiling: CGFloat, day: Int, stage: GrowthStage, thirsty: Bool
+        _ c: CGContext, u: CGFloat, base: CGPoint, ceiling: CGFloat, day: Int,
+        stage: GrowthStage, thirsty: Bool, look: Look
     ) {
-        // 45日目（開花）で背丈が止まる
-        let growth = min(max(CGFloat(day - 5) / 40, 0), 1)
+        // 開花の日で背丈が止まる
+        let growth = min(max(CGFloat(day - look.growthFrom) / CGFloat(look.growthSpan), 0), 1)
         let withered = stage == .withered
-        let drying = withered || day >= 70
+        let drying = withered || look.dryingFrom.map { day >= $0 } == true
         let green = drying ? rgb(0.55, 0.45, 0.27) : rgb(0.35, 0.58, 0.27)
 
         let height = (base.y - ceiling) * (0.08 + 0.92 * growth) * (withered ? 0.75 : 1)
@@ -137,12 +208,20 @@ enum PlaceholderPhotos {
 
         // 葉。水切れの日は垂らし、枯れたら落とす
         let droop: CGFloat = withered ? 1.2 : thirsty ? 0.9 : -0.35
-        let pairs = stage == .sprout ? 0 : (day >= 74 ? 2 : min(max((day - 8) / 5, 1), 7))
+        let shedding = look.sheddingFrom.map { day >= $0 } == true
+        let pairs =
+            stage == .sprout
+            ? 0
+            : (shedding ? 2 : min(max((day - look.leafFrom) / look.leafEvery, 1), 7))
         let leafLength = u * (0.07 + 0.07 * growth)
         for i in 0..<pairs {
             let t = CGFloat(i + 1) / CGFloat(pairs + 1) * 0.9
             // 58日目から下の葉が黄ばむ
-            let color = drying ? rgb(0.60, 0.48, 0.28) : (day >= 58 && i < 2) ? rgb(0.80, 0.75, 0.35) : green
+            let yellowing = look.yellowingFrom.map { day >= $0 } == true
+            let color =
+                drying
+                ? rgb(0.60, 0.48, 0.28)
+                : (yellowing && i < 2) ? rgb(0.80, 0.75, 0.35) : green
             for side: CGFloat in [-1, 1] {
                 drawLeaf(c, at: along(t), side: side, length: leafLength * (1 - t * 0.35), angle: droop, color: color)
             }
@@ -158,11 +237,18 @@ enum PlaceholderPhotos {
             c.setFillColor(rgb(0.30, 0.50, 0.22))
             c.fillEllipse(in: CGRect(x: top.x - u * 0.035, y: top.y - u * 0.035, width: u * 0.07, height: u * 0.07))
         case .bloom:
-            // 55日目あたりから花びらが褪せる
-            let petal = day >= 55 ? rgb(0.93, 0.80, 0.40) : rgb(0.98, 0.78, 0.15)
-            drawFlower(c, at: top, radius: u * 0.1, petals: 14, petal: petal, center: rgb(0.40, 0.25, 0.12))
+            // 決めた日から花びらが褪せる。褪せない株は最後まで色のまま
+            let fading = look.fadingFrom.map { day >= $0 } == true
+            let petal = fading ? look.fadedPetal.cg : look.petal.cg
+            drawFlower(
+                c, at: top, radius: u * look.flowerRadius, petals: look.petalCount,
+                petal: petal, center: look.flowerCenter.cg)
         case .seedSet:
-            drawFlower(c, at: top, radius: u * 0.09, petals: day >= 66 ? 0 : 6, petal: rgb(0.85, 0.70, 0.30), center: rgb(0.30, 0.20, 0.10))
+            let bald = look.baldFrom.map { day >= $0 } == true
+            drawFlower(
+                c, at: top, radius: u * (look.flowerRadius * 0.9),
+                petals: bald ? 0 : max(2, look.petalCount / 2),
+                petal: look.seedPetal.cg, center: look.seedCenter.cg)
         case .withered:
             c.setFillColor(rgb(0.35, 0.25, 0.15))
             c.fillEllipse(in: CGRect(x: top.x - u * 0.045, y: top.y - u * 0.045, width: u * 0.09, height: u * 0.09))

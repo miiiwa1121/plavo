@@ -116,10 +116,7 @@ struct PlantAvatar: View {
 
     var body: some View {
         Group {
-            if let ref = plant.avatarRef,
-                let data = model.store.image(ref),
-                let image = UIImage(data: data)
-            {
+            if let ref = plant.avatarRef, let image = model.store.thumbnail(ref, maxPixel: 200) {
                 Color.clear
                     .overlay { Image(uiImage: image).resizable().scaledToFill() }
             } else {
@@ -476,7 +473,8 @@ private struct GalleryTile: View {
         Color.clear
             .aspectRatio(1, contentMode: .fit)
             .overlay {
-                if let data = model.store.image(ref), let image = UIImage(data: data) {
+                // 一覧は小さい絵を通す（日記のグリッドと同じ理由）
+                if let image = model.store.thumbnail(ref) {
                     Image(uiImage: image).resizable().scaledToFill()
                 } else {
                     Rectangle().fill(.quaternary)

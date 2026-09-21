@@ -42,11 +42,32 @@ struct CameraTab: View {
     private let dryingRate: Double = 0.6
     private let tick = Timer.publish(every: 0.5, on: .main, in: .common).autoconnect()
 
+    /// 誰も見ていない状態（D40-a）。弧で「未設定」を選んでいる。
+    ///
+    /// このとき植物は**探してすらいない**（`SceneController.canDetectPlant`）。
+    /// 見つからないのではなく、見ていない
+    private var unassigned: Bool { model.store.selectedPlant == nil }
+
     var body: some View {
         ZStack {
             if ARWorldTrackingConfiguration.isSupported {
+                // **誰も見ていないなら、映像を眠らせる。**
+                // 向けても何も起きない画面が、向ければ何か起きる画面と
+                // 同じ見え方をしていると、押せないことに気づけない。
+                //
+                // ぼかすのは映像だけ。**弧とシャッターは鮮明に残す**——
+                // この状態から出る道がそこにしかない
                 ARViewContainer(controller: scene)
                     .ignoresSafeArea()
+                    .blur(radius: unassigned ? 16 : 0)
+                    .overlay {
+                        // ぼかしが効かない場合の保険も兼ねる。
+                        // ARKit が Metal で描く映像は、素材や効果が当たらないことがある
+                        Color.black.opacity(unassigned ? 0.18 : 0)
+                            .ignoresSafeArea()
+                            .allowsHitTesting(false)
+                    }
+                    .animation(.easeInOut(duration: 0.3), value: unassigned)
 
                 if let center = scene.bubbleScreenPoint, let target = scene.plantScreenPoint,
                     !line.isEmpty
@@ -110,13 +131,14 @@ struct CameraTab: View {
                 .zIndex(1)
             }
 
-            // 左下の1枚を開いたところ（D42）
-            if let ref = expandedPhoto, let data = model.store.image(ref),
-                let image = UIImage(data: data)
-            {
-                PhotoOverlay(image: image) { expandedPhoto = nil }
-                    .transition(.opacity)
-                    .zIndex(2)
+            // 左下の1枚を押して、今日撮った写真を見ているところ（D42 / D42-a）
+            if let ref = expandedPhoto {
+                TodayPhotosView(
+                    photos: model.store.todayPhotos, initial: ref, model: model,
+                    onClose: { expandedPhoto = nil }
+                )
+                .transition(.opacity)
+                .zIndex(2)
             }
         }
         // **投影した点にアニメーションを掛けない。**毎フレーム更新される値に
@@ -271,7 +293,9 @@ struct CameraTab: View {
             ShutterBar(
                 mode: $shutterMode,
                 onFire: { Task { await fire() } },
-                disabled: scene.isCapturing
+                disabled: scene.isCapturing,
+                // **「迎える」は塞がない。**未設定から出る道がそこにある
+                blocked: unassigned ? [.capture] : []
             )
             .padding(.bottom, 28)
         }
@@ -306,8 +330,7 @@ struct CameraTab: View {
     /// 撮る前から行き先が分かり、撮ったあとはそこが埋まるだけになる。**
     @ViewBuilder
     private var thumbnail: some View {
-        if let ref = model.store.latestPhotoRef, let data = model.store.image(ref),
-            let image = UIImage(data: data)
+        if let ref = model.store.latestPhotoRef, let image = model.store.thumbnail(ref, maxPixel: 200)
         {
             Button { expandedPhoto = ref } label: {
                 Image(uiImage: image)
@@ -387,18 +410,22 @@ struct CameraTab: View {
     }
 
     private func capture() async {
-        guard let plantId = model.store.plantForToday else {
+        // **撮った相手は、いま弧で見ている株**（D54）。
+        // `plantForToday` は「その日のページの主役」で生きている株を先に選ぶため、
+        // 見送ったひまりを見ていても、こすもの写真として積まれていた
+        guard let plantId = model.store.selectedPlantId else {
             captureNotice = "先に「迎える」で迎えてね"
             Haptics.caution()
             return
         }
         model.store.ensureTodayPage()
-        model.store.attachPlantToToday()
-        _ = plantId
+        model.store.attachPlantToToday(plantId)
 
         guard let today = model.store.todayEntry() else { return }
-        guard model.store.canAddPhoto(to: today) else {
-            captureNotice = "今日はもう\(DiaryEntry.maxPhotosPerDay)枚あります"
+        // 上限は株ごと（D54）。どの株が満ちたのかが分かるように名前を添える
+        guard model.store.canAddPhoto(to: today, of: plantId) else {
+            let name = model.store.plant(plantId)?.name ?? "この子"
+            captureNotice = "\(name)は今日もう\(DiaryEntry.maxPhotosPerPlantPerDay)枚あります"
             Haptics.caution()
             return
         }
@@ -413,9 +440,9 @@ struct CameraTab: View {
             return
         }
         Haptics.snap()
-        model.store.addPhoto(data, to: today.id)
-        let count = model.store.todayEntry()?.photoRefs.count ?? 0
-        captureNotice = "日記に追加しました（\(count)/\(DiaryEntry.maxPhotosPerDay)）"
+        model.store.addPhoto(data, to: today.id, of: plantId)
+        let count = model.store.todayEntry()?.photoCount(of: plantId) ?? 0
+        captureNotice = "日記に追加しました（\(count)/\(DiaryEntry.maxPhotosPerPlantPerDay)）"
     }
 
     // MARK: - 重ねる表示
@@ -450,7 +477,11 @@ struct CameraTab: View {
                         try? await Task.sleep(for: .seconds(2))
                         captureNotice = nil
                     }
-            } else if case .none = scene.subject {
+            } else if case .none = scene.subject, !unassigned {
+                // **未設定のときは出さない。**探してすらいないので（D40-a）、
+                // 「見当たらない」は嘘になる。誰も見ていないことは、
+                // ぼけた映像と斜線の入ったシャッターで伝わる。
+                //
                 // D24 により、見つからない状態をエラーとして扱わない
                 Text("見当たらないなぁ")
                     .font(.callout)

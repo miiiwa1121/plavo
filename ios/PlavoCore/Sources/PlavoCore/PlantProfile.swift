@@ -115,6 +115,35 @@ extension PlantProfile {
         naturalCompletionStage: nil
     )
 
+    /// コスモス。一年草で、秋に咲いて種を結ぶ。
+    ///
+    /// **やせた土と日なたを好む。**肥料が多いと葉ばかり茂って花が減るため、
+    /// 養分の適正はミニひまわりより低く取る。乾き気味に強い。
+    public static let cosmos = PlantProfile(
+        id: "cosmos",
+        displayName: "コスモス",
+        isAnnual: true,
+        baseTempC: 10,
+        gddToBloom: 1000,
+        gddToMaturity: 1600,
+        dliRange: 15...30,
+        soilMoistureRange: 20...50,
+        soilMoistureFloor: 20,
+        tempRange: 15...30,
+        humidityRange: 40...70,
+        // 肥料を控える。多いと葉ばかり茂って花が減る
+        ecRange: 0.8...1.6,
+        character: "やせた土と日なたを好む。かまいすぎるより、放っておかれるほうが花をつける",
+        naturalCompletionStage: .bloom,
+        // 酸性から弱アルカリまで幅広く育つ
+        soilPhRange: 6.0...8.0
+    )
+
     /// 展示に使う植物が決まるまでの既定（D17-a）
     public static let `default` = miniSunflower
+
+    /// 表示名から引く。仕込みの株が複数になったので、株ごとに適正範囲を変える（D53）
+    public static func named(_ displayName: String) -> PlantProfile? {
+        [miniSunflower, pothos, cosmos].first { $0.displayName == displayName }
+    }
 }

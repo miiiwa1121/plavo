@@ -25,7 +25,17 @@ struct DiaryTab: View {
                     DiaryGrid(model: model, path: $path)
                 }
             }
+            // **大見出しにしない。細い見出しのまま置く。**
+            //
+            // 大見出しは送ると畳み、戻すと広がる。高さが変わるということは
+            // 内容の位置が動くということで、遅れて作られるマス（`LazyVGrid`）と
+            // 噛み合うと、高さが変わる → 位置が直る → 畳み具合が変わる、と往復して
+            // **小さく上下に揺れる。**
+            //
+            // 細い見出しは高さが変わらないので、これが起きない。
+            // 薄い地（ガラス）も残るため、送った写真が時計の下を素通りしない
             .navigationTitle("日記")
+            .navigationBarTitleDisplayMode(.inline)
         }
     }
 
@@ -59,37 +69,66 @@ private struct DiaryGrid: View {
     }
 
     var body: some View {
-        ScrollView {
-            LazyVGrid(columns: columns, spacing: spacing) {
-                ForEach(units) { unit in
-                    switch unit {
-                    case .entry(let entry, let runId):
-                        DiaryTile(entry: entry, model: model)
-                            // 展開したお休みは、ダブルタップで畳む。
-                            // count: 2 を先に置かないと、シングルが先に取られる
-                            // ダブルタップは当たったかどうかが分かりにくい
-                            .onTapGesture(count: 2) {
-                                guard let runId else { return }
-                                Haptics.tap()
-                                expanded.remove(runId)
-                            }
-                            .onTapGesture { path.append(entry.id) }
+        // **一辺を先に決める。**`aspectRatio` に高さを導かせると、
+        // マスが作られるたびに高さを測り直すことになり、
+        // 送っている最中に内容の位置が細かくずれる
+        GeometryReader { proxy in
+            let side = max(1, (proxy.size.width - spacing * 2) / 3)
 
-                    case .restRun(let id, let entries):
-                        RestRunTile(entries: entries)
-                            // 何日ぶんかが一度に現れる。開いた手応えがあると、
-                            // 増えたマスが何なのか分かる
-                            .onTapGesture {
-                                Haptics.tap()
-                                expanded.insert(id)
+            ScrollView {
+                LazyVGrid(columns: columns, spacing: spacing) {
+                    ForEach(units) { unit in
+                        switch unit {
+                        case .entry(let entry, let runId):
+                            // **畳む二度打ちは、畳めるマスにだけ付ける。**
+                            //
+                            // 全部のマスに付けると、指を置くたびに「二度目が来るか」を
+                            // 待つことになり、その間スクロールが始まらない。待ってから
+                            // 追いつくので、**送り始めに引っかかって見える。**
+                            // 畳めないマス（お休みのまとまりの外）では、待った末に
+                            // `guard` で何もせず帰るだけだった。
+                            if let runId {
+                                DiaryTile(entry: entry, model: model)
+                                    .frame(width: side, height: side)
+                                    // count: 2 を先に置かないと、シングルが先に取られる
+                                    .onTapGesture(count: 2) {
+                                        Haptics.tap()
+                                        withAnimation(.easeInOut(duration: 0.2)) {
+                                            expanded.remove(runId)
+                                        }
+                                    }
+                                    .onTapGesture { path.append(entry.id) }
+                            } else {
+                                DiaryTile(entry: entry, model: model)
+                                    .frame(width: side, height: side)
+                                    .onTapGesture { path.append(entry.id) }
                             }
+
+                        case .restRun(let id, let entries):
+                            RestRunTile(entries: entries)
+                                .frame(width: side, height: side)
+                                // 何日ぶんかが一度に現れる。開いた手応えがあると、
+                                // 増えたマスが何なのか分かる
+                                .onTapGesture {
+                                    Haptics.tap()
+                                    withAnimation(.easeInOut(duration: 0.2)) {
+                                        expanded.insert(id)
+                                    }
+                                }
+                        }
                     }
                 }
+                // **見出しの薄い地に、1枚目を重ねない。**
+                // ガラスの帯は下を透かすので、詰めて置くと最初の行だけ
+                // 色がかぶって見える
+                .padding(.top, 16)
             }
-        }
-        .animation(.easeInOut(duration: 0.2), value: expanded)
-        .navigationDestination(for: UUID.self) { id in
-            DiaryFeedView(model: model, startId: id)
+            // **`.animation` をスクロールに掛けない。**
+            // 掛けると、送っている最中に作られるマスの配置まで動きの対象になる。
+            // 畳む・広げるのは操作した場所で `withAnimation` に包む
+            .navigationDestination(for: UUID.self) { id in
+                DiaryFeedView(model: model, startId: id)
+            }
         }
     }
 
@@ -207,10 +246,8 @@ private struct DiaryTile: View {
 
     @ViewBuilder
     private var background: some View {
-        if let ref = entry.photoRefs.first,
-            let data = model.store.image(ref),
-            let image = UIImage(data: data)
-        {
+        // **小さい絵を通す。**元の大きさで開くと、マスを送るたびに開き直すことになる
+        if let ref = entry.photoRefs.first, let image = model.store.thumbnail(ref) {
             Image(uiImage: image)
                 .resizable()
                 .scaledToFill()
@@ -347,6 +384,8 @@ private struct DiaryFeedView: View {
         }
         .navigationTitle("日記")
         .navigationBarTitleDisplayMode(.inline)
+        // 一覧では隠してあるので、ここでは明示して出す（戻る道がここにある）
+        .toolbar(.visible, for: .navigationBar)
     }
 }
 
@@ -392,7 +431,8 @@ private struct DiaryCard: View {
             }
             Spacer()
 
-            if model.store.canAddPhoto(to: entry) {
+            // 上限は株ごと（D54）。ページの写真は、その日の主役の分として足す
+            if model.store.canAddPhoto(to: entry, of: entry.plantId) {
                 // 写真を足す。上限に達したら消える
                 PhotosPicker(selection: $pickerItem, matching: .images) {
                     Image(systemName: "plus")
@@ -401,7 +441,7 @@ private struct DiaryCard: View {
                         .background(.quaternary, in: Circle())
                 }
             } else {
-                Text("\(DiaryEntry.maxPhotosPerDay)枚まで")
+                Text("\(DiaryEntry.maxPhotosPerPlantPerDay)枚まで")
                     .font(.caption2).foregroundStyle(.tertiary)
             }
         }
@@ -507,7 +547,7 @@ private struct DiaryCard: View {
         Task {
             guard let data = try? await item.loadTransferable(type: Data.self) else { return }
             await MainActor.run {
-                model.store.addPhoto(data, to: entryId)
+                model.store.addPhoto(data, to: entryId, of: entry?.plantId)
                 Haptics.tap()
                 pickerItem = nil
             }

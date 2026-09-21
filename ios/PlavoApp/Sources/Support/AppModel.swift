@@ -35,6 +35,12 @@ final class AppModel {
     /// 展示に使う植物のプロファイル。種類が決まったら差し替える（D17-a）
     let profile: PlantProfile = .default
 
+    /// 株ごとのプロファイル。**仕込みの株が2種類になったので、種で引く**（D53）。
+    /// 知らない種なら既定に落ちる
+    func profile(for plant: Plant?) -> PlantProfile {
+        plant.flatMap { PlantProfile.named($0.species) } ?? profile
+    }
+
     /// 連続した水やりの検出。過湿の帯域はここでのみ選ばれる
     private(set) var consecutiveWatering = false
     private var lastMoisture: Double = initialSoilMoisture
@@ -43,9 +49,16 @@ final class AppModel {
         do {
             let loaded = try Self.loadBank()
             bank = loaded
-            // すでに育ててきた1株を用意する（L-12）。
+            // すでに育ててきた株を用意する（L-12 / D53）。
             // 展示では記録が積み上がる時間がないため、あらかじめ仕込む。
-            store.seed(from: loaded, profile: profile, growth: try Self.loadGrowth())
+            //
+            // **2株。**ひまりは一生を終えた株（時系列パネルと一致する）、
+            // こすもは3ヶ月目の生きている株。ひまりだけだと
+            // 「迎え入れた株がいない」状態に見えていた（D52）
+            if let himari = SeedPlan.himari(from: loaded, profile: profile) {
+                store.seed(himari, growth: try Self.loadGrowth(himari.growthFile))
+            }
+            store.seed(SeedPlan.kosumo, growth: try Self.loadGrowth(SeedPlan.kosumo.growthFile))
 
             // 起動引数で株を登録できる。
             //   例: -registerPlant そら
@@ -111,12 +124,12 @@ final class AppModel {
         return try DialogueBank.load(from: url)
     }
 
-    private static func loadGrowth() throws -> GrowthRecordFile {
-        guard let url = Bundle.main.url(forResource: "himari", withExtension: "json", subdirectory: "growth")
+    private static func loadGrowth(_ name: String) throws -> GrowthRecordFile {
+        guard let url = Bundle.main.url(forResource: name, withExtension: "json", subdirectory: "growth")
         else {
             throw NSError(
                 domain: "plavo", code: 2,
-                userInfo: [NSLocalizedDescriptionKey: "growth/himari.json がバンドルに含まれていません"])
+                userInfo: [NSLocalizedDescriptionKey: "growth/\(name).json がバンドルに含まれていません"])
         }
         return try GrowthRecordFile.load(from: url)
     }

@@ -245,7 +245,8 @@ private struct StripThumbnail: View {
                 height: GalleryStripView.thumbnailHeight
             )
             .overlay {
-                if let data = model.store.image(ref), let image = UIImage(data: data) {
+                // 列は小さい絵を通す。なぞると何枚も一度に入れ替わる
+                if let image = model.store.thumbnail(ref, maxPixel: 200) {
                     Image(uiImage: image).resizable().scaledToFill()
                 } else {
                     Rectangle().fill(.quaternary)

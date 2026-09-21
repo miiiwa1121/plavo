@@ -1,6 +1,7 @@
 import Foundation
 import Observation
 import PlavoCore
+import UIKit
 
 /// 植物・観察・日記を保持する。
 ///
@@ -32,49 +33,47 @@ final class PlantStore {
 
     /// 仕込みの株。展示中ずっと残る。
     ///
-    /// 位置づけは「開発者が3ヶ月育てた記録」。来場者はこれを見てから、
+    /// 位置づけは「開発者が育ててきた記録」。来場者はこれを見てから、
     /// 自分でも1株を登録する。セクション1で伝えたい「時間が積み上がる」が
     /// アプリの中で直接見える。
-    private(set) var seededPlantId: UUID?
-    /// 仕込んだ観察の件数。リセットでここまで戻す
-    private var seededObservationCount = 0
+    ///
+    /// **2株いる**（D53）。ひまりは一生を終えた株、こすもは3ヶ月目の生きている株。
+    /// ひまりだけだと「迎え入れた株がいない」状態に見えていた（D52）
+    private(set) var seededPlantIds: Set<UUID> = []
     /// 仕込みの仮の写真（D47）。「直近の1枚」（D42）には出さない
     private var seededPhotoRefs: Set<String> = []
+
+    /// 小さい絵の置き場。**観察の対象にしない**——
+    /// 覚え直しは見た目を変えないので、画面を描き直す理由にならない
+    @ObservationIgnored private let thumbnails = ThumbnailCache()
 
     /// 選択中の株。カメラで観察した結果はここに積まれる
     var selectedPlantId: UUID?
 
     // MARK: - 仕込み
 
-    /// timeline.json から、すでに育ててきた1株を組み立てる（L-12）。
+    /// 筋書き（`SeedPlan`）から、すでに育ててきた株を組み立てる（L-12 / D53）。
     ///
     /// 展示では記録が積み上がる時間がないため、あらかじめ用意する。
-    /// これがマイプラントと日記の中身になり、時系列パネルとも一致する。
-    func seed(from bank: DialogueBank, profile: PlantProfile, growth growthFile: GrowthRecordFile) {
-        guard seededPlantId == nil else { return }
-        seedSource = bank
-        seedProfile = profile
-        seedGrowth = growthFile
+    /// これがマイプラントと日記の中身になり、ひまりは時系列パネルとも一致する。
+    func seed(_ plan: SeedPlan, growth growthFile: GrowthRecordFile) {
+        guard !seedPlans.contains(where: { $0.plan.name == plan.name }) else { return }
+        seedPlans.append((plan, growthFile))
+        build(plan, growth: growthFile)
+    }
 
-        // パネルの最終日から逆算して、出会った日を決める。
-        //
-        // 没日は「昨日」に寄せる。日記は1日1ページで自動的に増えるため、
-        // 没後の日数だけお休みのページが並ぶ。間を空けすぎると、
-        // グリッドの先頭がお休みで埋まってしまう。
-        let lastDay = bank.timeline.compactMap { Self.day(from: $0.dayLabel) }.max() ?? 0
-        let sinceDeath = 1
+    private func build(_ plan: SeedPlan, growth growthFile: GrowthRecordFile) {
         let plantedAt =
-            Calendar.current.date(byAdding: .day, value: -(lastDay + sinceDeath), to: Date())
-            ?? Date()
+            Calendar.current.date(byAdding: .day, value: -plan.totalDays, to: Date()) ?? Date()
 
         let plant = Plant(
-            name: "ひまり",
-            species: profile.displayName,
+            name: plan.name,
+            species: plan.profile.displayName,
             plantedAt: plantedAt
         )
         plants.append(plant)
-        seededPlantId = plant.id
-        // 一生分の計測値（D44）。ファイルは出会った日の0時から数えている
+        seededPlantIds.insert(plant.id)
+        // これまで分の計測値（D44）。ファイルは出会った日の0時から数えている
         growth[plant.id] = growthFile.series(startingAt: Calendar.current.startOfDay(for: plantedAt))
         // **選択中にはしない。**
         // 選択済みにすると、カメラを向けても「はじめまして」が出ず、
@@ -82,56 +81,61 @@ final class PlantStore {
         // 仕込みの株はマイプラントと日記で「これまでの記録」として見せ、
         // 来場者は自分で1株を登録するところから始める。
 
-        // 観察は、パネルのある日にだけ記録する
+        // 観察は、段階の変わり目にだけ記録する
         var obs: [PlantObservation] = []
-        var byDay: [Int: DialogueBank.Panel] = [:]
-        for panel in bank.timeline {
-            guard let day = Self.day(from: panel.dayLabel) else { continue }
-            byDay[day] = panel
+        for (day, stage) in plan.milestones.sorted(by: { $0.key < $1.key }) {
             guard let date = Calendar.current.date(byAdding: .day, value: day, to: plantedAt)
             else { continue }
             obs.append(
                 PlantObservation(
                     observedAt: date,
                     plantDetected: true,
-                    stage: GrowthStage(rawValue: Self.stageKey(from: panel.key)) ?? .trueLeaf,
+                    stage: stage,
                     appearances: [],
                     heightCm: nil,
                     confidence: .high,
-                    dialogue: panel.lines.first ?? ""))
+                    dialogue: plan.dialogue[day] ?? ""))
         }
-        observations[plant.id] = obs.sorted { $0.observedAt < $1.observedAt }
-        seededObservationCount = obs.count
+        observations[plant.id] = obs
 
         // **日記は1日1ページ。書かなかった日もページを作る。**
         // 記録しなかった日を無かったことにはしない（D18-a）。
-        var reachedStage: GrowthStage = .seed
-        for day in 1...lastDay {
+        for day in 1...max(1, plan.days) {
             guard let date = Calendar.current.date(byAdding: .day, value: day, to: plantedAt)
             else { continue }
-            if let panel = byDay[day] {
-                reachedStage = GrowthStage(rawValue: Self.stageKey(from: panel.key)) ?? reachedStage
+            // **今日のページは作らない。**今日は来場者のもの。
+            // 仕込みが1ページでも置くと、その1枚が写真の枠（5枚）を食い、
+            // 1枚目から「2/5」になる。筋書き側でも昨日までに収めてある
+            guard !Calendar.current.isDateInToday(date) else { continue }
+            let stage = plan.stage(upTo: day)
+            let shots = plan.shots[day] ?? 1
+            if let text = plan.milestoneText[day] {
                 diary.append(
                     DiaryEntry(
                         plantId: plant.id,
                         date: date,
-                        stage: reachedStage,
+                        stage: stage,
                         dayLabel: "\(day)日目",
-                        text: Self.seededText(for: panel),
-                        quotedDialogue: panel.lines.first,
-                        photoRefs: seedPhotos(
-                            day: day, stage: reachedStage, thirsty: panel.key == "trueLeaf-thirsty"),
+                        text: text,
+                        quotedDialogue: plan.dialogue[day],
+                        photos: seedPhotos(
+                            day: day, stage: stage,
+                            thirsty: plan.thirstyDays.contains(day), shots: shots,
+                            look: plan.look, of: plant.id),
                         author: .auto))
-            } else if let ordinary = Self.ordinaryText(day: day) {
+            } else if let ordinary = plan.ordinary[day] {
                 // 段階の変わり目ではないが、何か書いた日
                 diary.append(
                     DiaryEntry(
                         plantId: plant.id,
                         date: date,
-                        stage: reachedStage,
+                        stage: stage,
                         dayLabel: "\(day)日目",
                         text: ordinary,
-                        photoRefs: seedPhotos(day: day, stage: reachedStage, thirsty: false),
+                        photos: seedPhotos(
+                            day: day, stage: stage,
+                            thirsty: plan.thirstyDays.contains(day), shots: shots,
+                            look: plan.look, of: plant.id),
                         author: .user))
             } else {
                 // お休みした日
@@ -139,7 +143,7 @@ final class PlantStore {
                     DiaryEntry(
                         plantId: plant.id,
                         date: date,
-                        stage: reachedStage,
+                        stage: stage,
                         dayLabel: "\(day)日目",
                         text: "",
                         author: .user))
@@ -148,65 +152,19 @@ final class PlantStore {
         diary.sort { $0.date > $1.date }
     }
 
-    /// 仮の写真を描いて置き、参照名を返す（D47）。
+    /// 仮の写真を描いて置き、その株の写真として返す（D47 / D54）。
     ///
     /// **何か書いた日にだけ撮ったことにする。**お休みの日は写真も無い
-    private func seedPhotos(day: Int, stage: GrowthStage, thirsty: Bool) -> [String] {
-        (0..<PlaceholderPhotos.shots(onDay: day)).map { shot in
+    private func seedPhotos(
+        day: Int, stage: GrowthStage, thirsty: Bool, shots: Int, look: PlaceholderPhotos.Look,
+        of plantId: UUID
+    ) -> [DiaryPhoto] {
+        (0..<max(1, shots)).map { shot in
             let ref = UUID().uuidString
-            images[ref] = PlaceholderPhotos.jpeg(day: day, stage: stage, thirsty: thirsty, shot: shot)
+            images[ref] = PlaceholderPhotos.jpeg(
+                day: day, stage: stage, thirsty: thirsty, shot: shot, look: look)
             seededPhotoRefs.insert(ref)
-            return ref
-        }
-    }
-
-    /// パネルのキーから生育段階を取る。`trueLeaf-thirsty` のような
-    /// 修飾つきのキーがあるため、ハイフンの前だけを見る
-    private static func stageKey(from panelKey: String) -> String {
-        String(panelKey.split(separator: "-").first ?? "")
-    }
-
-    /// 「45日目」から 45 を取り出す
-    private static func day(from label: String) -> Int? {
-        Int(label.prefix(while: \.isNumber))
-    }
-
-    /// 段階の変わり目ではない、ふつうの日の日記。
-    ///
-    /// **お休みが長く続きすぎないように置く。**
-    /// timeline.json のパネルは8日分しかないため、そのままだと
-    /// 16日連続で空白になる区間ができ、実際に育てている人の日記に見えない。
-    /// 毎日は書かないが、そこそこ書く——という現実の粒度に寄せる。
-    static func ordinaryText(day: Int) -> String? {
-        switch day {
-        case 3: "まだ何も出てこない。土は湿っている。"
-        case 9: "芽がまっすぐ立ってきた。ひょろっとしている。"
-        case 18: "葉が四枚になった。窓際に移した。"
-        case 28: "水やりの間隔がつかめてきた。三日にいちどくらい。"
-        case 33: "背が伸びて少し傾いている。支柱を立てた。"
-        case 41: "つぼみが膨らんだ気がする。毎日見てしまう。"
-        case 50: "満開。写真ばかり撮っている。"
-        case 55: "花びらの色が少し褪せてきた。"
-        case 58: "下のほうの葉が黄色くなりはじめた。"
-        case 66: "種が硬くなってきた。触ると分かる。"
-        case 70: "茎が乾いてきている。水をやっても戻らない。"
-        case 74: "葉がほとんど落ちた。種だけがしっかりしている。"
-        default: nil
-        }
-    }
-
-    /// 仕込みの日記の本文。植物が言ったことを受けて、飼い主が書いた体で綴る
-    private static func seededText(for panel: DialogueBank.Panel) -> String {
-        switch panel.key {
-        case "sprout": "土からちいさい芽が出ていた。ちゃんと出てきてくれた。"
-        case "trueLeaf-early": "本葉が開いた。毎日見ていると気づかないけど、写真を見比べると伸びている。"
-        case "trueLeaf-thirsty": "帰ってきたら葉が下を向いていた。あわてて水をあげた。"
-        case "trueLeaf-recovered": "朝には元に戻っていた。水をあげただけでこんなに違う。"
-        case "bud": "てっぺんに緑のかたまりができている。もうすぐだと思う。"
-        case "bloom": "咲いた。思っていたより大きい。"
-        case "seedSet": "花びらが落ちはじめた。まんなかに種ができている。"
-        case "withered": "葉が茶色くなって、茎が倒れた。種は取ってある。"
-        default: ""
+            return DiaryPhoto(ref: ref, plantId: plantId)
         }
     }
 
@@ -281,7 +239,7 @@ final class PlantStore {
 
     /// 削除できるか。仕込みの株は消せない（展示の土台のため）
     func canRemove(_ plantId: UUID) -> Bool {
-        plantId != seededPlantId
+        !seededPlantIds.contains(plantId)
     }
 
     func remove(_ plantId: UUID) {
@@ -291,6 +249,16 @@ final class PlantStore {
         observations[plantId] = nil
         growth[plantId] = nil
         bucketers[plantId] = nil
+        // その株の写真は、どのページからも抜く（D54）。
+        // 同じ日に別の株を撮っていると、1ページに混ざっている
+        for i in diary.indices {
+            for photo in diary[i].photos where photo.plantId == plantId { images[photo.ref] = nil }
+            diary[i].photos.removeAll { $0.plantId == plantId }
+        }
+        // 主役だったページごと消す。残っている写真の実体も捨てる
+        for entry in diary where entry.plantId == plantId {
+            for photo in entry.photos { images[photo.ref] = nil }
+        }
         diary.removeAll { $0.plantId == plantId }
         if selectedPlantId == plantId { selectedPlantId = nil }
     }
@@ -325,7 +293,7 @@ final class PlantStore {
 
     func removeDiary(_ id: UUID) {
         if let entry = diary.first(where: { $0.id == id }) {
-            for ref in entry.photoRefs { images[ref] = nil }
+            for photo in entry.photos { images[photo.ref] = nil }
         }
         diary.removeAll { $0.id == id }
     }
@@ -343,7 +311,11 @@ final class PlantStore {
     /// 起動時と、画面が前面に戻ったときに呼ぶ。
     func ensureTodayPage() {
         guard todayEntry() == nil else { return }
-        let plantId = plantForToday
+        // **仕込みの株を今日の主役にしない**（D53 / screen-design §8-a）。
+        // 迎える前にページができるため、ここで主役を決めてしまうと、
+        // 来場者が迎えたあとも `attachPlantToToday` が効かず（nil でなくなる）、
+        // 撮った写真が仕込みの株のギャラリーに積まれる
+        let plantId = plantForToday.flatMap { seededPlantIds.contains($0) ? nil : $0 }
         let entry = DiaryEntry(
             plantId: plantId,
             date: Date(),
@@ -355,17 +327,37 @@ final class PlantStore {
         addDiary(entry)
     }
 
-    /// その日の主役になる株。枯れた株は選ばない
+    /// その日の主役になる株。**生きている株を先に選ぶ。**
+    ///
+    /// **これは「ページの主役」であって「撮った相手」ではない**（D54）。
+    /// 写真の相手には弧で選んでいる株（`selectedPlantId`）を使う。
+    /// ここは生きている株を先に返すため、見送った株を見ているときに
+    /// 別の株を指す。
+    ///
+    /// 生きている株が一つも無いときは、見送った株を返す。
+    /// **仕込みの株（ひまり）は一生を終えた状態で入っている**（timeline.json の
+    /// 最終パネルが枯死）ので、ここで弾くと**すでに株がいるのに
+    /// 「先に迎えてね」と言われる。**撮った1枚の行き先が無いより、
+    /// その子のページに残るほうがよい。
+    ///
+    /// 没後も日記のページは続く（`ensureTodayPage`）ので、
+    /// 見送った株のページに積むこと自体は、いまの作りと矛盾しない。
     var plantForToday: UUID? {
         if let selected = selectedPlantId, stage(of: selected) != .withered {
             return selected
         }
-        return plants.first { stage(of: $0.id) != .withered }?.id
+        if let living = plants.first(where: { stage(of: $0.id) != .withered }) {
+            return living.id
+        }
+        return selectedPlantId ?? plants.first?.id
     }
 
-    /// 出会ってから何日目か
+    /// 出会ってから何日目か。
+    ///
+    /// **見送った株には添えない。**日数は没日で止まる（screen-design §4.3）ので、
+    /// 今日のページに「79日目」と置くと、いなかった日を数えることになる
     private func dayLabel(for plantId: UUID) -> String? {
-        guard let plant = plant(plantId) else { return nil }
+        guard let plant = plant(plantId), stage(of: plantId) != .withered else { return nil }
         return "\(daysTogether(plant) + 1)日目"
     }
 
@@ -377,37 +369,61 @@ final class PlantStore {
         diary[i].text = text
     }
 
-    /// 写真を足す。上限に達していれば false を返す
+    /// 写真を足す。**上限は株ごと**（D54）。達していれば false を返す
     @discardableResult
-    func addPhoto(_ data: Data, to id: UUID) -> Bool {
+    func addPhoto(_ data: Data, to id: UUID, of plantId: UUID?) -> Bool {
         guard let i = diary.firstIndex(where: { $0.id == id }) else { return false }
-        guard diary[i].photoRefs.count < DiaryEntry.maxPhotosPerDay else { return false }
+        guard canAddPhoto(to: diary[i], of: plantId) else { return false }
         let ref = UUID().uuidString
         images[ref] = data
-        diary[i].photoRefs.append(ref)
+        diary[i].photos.append(DiaryPhoto(ref: ref, plantId: plantId))
         return true
     }
 
     func removePhoto(_ ref: String, from id: UUID) {
         guard let i = diary.firstIndex(where: { $0.id == id }) else { return }
-        diary[i].photoRefs.removeAll { $0 == ref }
+        diary[i].photos.removeAll { $0.ref == ref }
         images[ref] = nil
     }
 
     func image(_ ref: String) -> Data? { images[ref] }
 
-    /// 直近に撮った1枚（D42）。
+    /// グリッドや列に出す小さい絵。
     ///
-    /// 日記は新しい順に並び、その日のページの中では撮った順に積まれる。
-    /// 写真のあるいちばん新しいページの、いちばん後ろが最後の1枚になる。
+    /// **一覧はここを通す。**元の大きさで開くと、マスを送るたびに開き直すことになる
+    /// （`ThumbnailCache`）。既定の 400px は、3列グリッドのマス（約130pt）を
+    /// 3倍の画面で埋めるのに足りる大きさ。
+    func thumbnail(_ ref: String, maxPixel: CGFloat = 400) -> UIImage? {
+        thumbnails.image(for: ref, maxPixel: maxPixel, data: images[ref])
+    }
+
+    /// 今日撮った写真を、**撮った順（古い順）**に。
+    ///
+    /// 左下の1枚を押した先で並べる（D42-a）。**株はまたぐ。**その日に撮ったものが
+    /// すべて並ぶのが「今日の分」であり、誰を撮ったかで分けるのはギャラリーの役。
+    ///
+    /// **仕込みの仮の写真は含めない**（D47）。今日のページには載らないが、
+    /// 出どころが変わっても混ざらないようにここでも外す。
+    var todayPhotos: [PlantPhoto] {
+        guard let entry = todayEntry() else { return [] }
+        return
+            entry.photos
+            .filter { !seededPhotoRefs.contains($0.ref) }
+            .map {
+                PlantPhoto(
+                    ref: $0.ref, date: entry.date, dayLabel: entry.dayLabel, plantId: $0.plantId)
+            }
+    }
+
+    /// 直近に撮った1枚（D42）。カメラの左下に出す。
+    ///
+    /// **今日に限る**（D42-a）。押した先はその日に撮った写真を並べる画面なので、
+    /// 昨日の1枚を出すと、開いた瞬間に中身と食い違う。
+    /// 今日まだ1枚も撮っていなければ、空の枠のまま（撮る前と同じ）。
     ///
     /// **仕込みの仮の写真は含めない**（D47）。含めると、まだ1枚も撮っていないのに
     /// ひまりの写真が出てしまう（D42 では何も出さない）
-    var latestPhotoRef: String? {
-        diary.lazy
-            .flatMap { $0.photoRefs.reversed() }
-            .first { !self.seededPhotoRefs.contains($0) }
-    }
+    var latestPhotoRef: String? { todayPhotos.last?.ref }
 
     /// その株の写真を、新しい順に集める。
     ///
@@ -417,30 +433,38 @@ final class PlantStore {
     ///
     /// ページの中の写真は撮った順に積まれているので、**日の中も逆にして**新しい順に揃える。
     /// 1枚を追う画面は、これをそのまま逆にして時間の流れで並べる（D46）。
+    ///
+    /// **ページではなく写真で絞る**（D54）。同じ日に2株を撮ると1ページに混ざるため、
+    /// ページの主役で絞ると、もう一方の株の写真まで連れてきてしまう。
     func photos(of plantId: UUID) -> [PlantPhoto] {
-        diary
-            .filter { $0.plantId == plantId }
-            .flatMap { entry in
-                entry.photoRefs.reversed().map {
-                    PlantPhoto(ref: $0, date: entry.date, dayLabel: entry.dayLabel)
+        diary.flatMap { entry in
+            entry.photos.reversed()
+                .filter { $0.plantId == plantId }
+                .map {
+                    PlantPhoto(
+                        ref: $0.ref, date: entry.date, dayLabel: entry.dayLabel, plantId: $0.plantId)
                 }
-            }
+        }
     }
 
     /// 今日のページに株を結びつける。登録より先にページができているため、
-    /// あとから主役が決まることがある
-    func attachPlantToToday() {
+    /// あとから主役が決まることがある。
+    ///
+    /// **撮った相手をそのまま渡す。**`plantForToday` から引くと、
+    /// 見送った株（ひまり）を撮っているのにページの主役が
+    /// 生きている株（こすも）になる（D54）。
+    func attachPlantToToday(_ plantId: UUID) {
         guard let i = diary.firstIndex(where: { Calendar.current.isDateInToday($0.date) }),
-            diary[i].plantId == nil,
-            let plantId = plantForToday
+            diary[i].plantId == nil
         else { return }
         diary[i].plantId = plantId
         diary[i].stage = stage(of: plantId)
         diary[i].dayLabel = dayLabel(for: plantId)
     }
 
-    func canAddPhoto(to entry: DiaryEntry) -> Bool {
-        entry.photoRefs.count < DiaryEntry.maxPhotosPerDay
+    /// その株を、この日にもう1枚撮れるか（D54）
+    func canAddPhoto(to entry: DiaryEntry, of plantId: UUID?) -> Bool {
+        entry.photoCount(of: plantId) < DiaryEntry.maxPhotosPerPlantPerDay
     }
 
     // MARK: - 取り出し
@@ -513,20 +537,18 @@ final class PlantStore {
         images.removeAll()
         growth.removeAll()
         bucketers.removeAll()
-        seededPlantId = nil
-        seededObservationCount = 0
+        seededPlantIds.removeAll()
         seededPhotoRefs.removeAll()
+        thumbnails.removeAll()
         // 未選択に戻す。次の来場者も「はじめまして」から始まる
         selectedPlantId = nil
-        if let bank = seedSource, let growthFile = seedGrowth {
-            seed(from: bank, profile: seedProfile ?? .default, growth: growthFile)
-        }
+        // 仕込みの株は組み直す。筋書きは持ったままなので読み込みは要らない
+        for entry in seedPlans { build(entry.plan, growth: entry.growth) }
     }
 
     /// 作り直すために、仕込みの元を覚えておく
-    private var seedSource: DialogueBank?
-    private var seedProfile: PlantProfile?
-    private var seedGrowth: GrowthRecordFile?
+    /// 仕込みの筋書きと計測値。リセットのたびに組み直すために持つ
+    private var seedPlans: [(plan: SeedPlan, growth: GrowthRecordFile)] = []
 }
 
 /// ギャラリーに並べる1枚。写真の実体は持たず、どの日のページのものかだけを添える
@@ -536,4 +558,6 @@ struct PlantPhoto: Hashable {
     let date: Date
     /// そのページの「何日目」。持たないページもある
     let dayLabel: String?
+    /// 撮った相手（D54）。株をまたいで並べる場面で、どの子かを言うために持つ
+    var plantId: UUID?
 }

@@ -138,11 +138,34 @@ public struct Plant: Codable, Sendable, Identifiable, Equatable {
 ///
 /// 絵は観察時に撮影した写真を使う。AI生成のイラストは使わない——
 /// 生成された絵は「自分の植物」ではなく、振り返ったときに感情が乗らない。
+/// 日記に貼られた写真1枚（D54）。
+///
+/// **どの株を撮ったかを写真そのものが持つ。**ページの主役（`DiaryEntry.plantId`）に
+/// 預けると、同じ日に2株を撮ったとき、後から撮ったほうの写真が
+/// 先の株のギャラリーに積まれる。上限も株ごとに数えられない。
+public struct DiaryPhoto: Codable, Sendable, Equatable, Hashable, Identifiable {
+    /// 画像の実体への参照。実体は PlantStore が持つ
+    public let ref: String
+    /// 撮った相手。株が決まっていない日に足した写真は nil
+    public var plantId: UUID?
+
+    public var id: String { ref }
+
+    public init(ref: String, plantId: UUID? = nil) {
+        self.ref = ref
+        self.plantId = plantId
+    }
+}
+
 public struct DiaryEntry: Codable, Sendable, Identifiable, Equatable {
 
-    /// 1日に追加できる写真の上限。
+    /// 1日に追加できる写真の上限。**株ごとに数える**（D54）。
+    ///
+    /// ページは1日に1枚だが、その日に複数の株を撮ることがある。
+    /// ページ全体で数えると、先に撮った株が枠を使い切り、
+    /// **もう一方の株が1枚も撮れなくなる。**
     /// 多すぎると1日が冗長になり、少なすぎると記録しきれない。
-    public static let maxPhotosPerDay = 5
+    public static let maxPhotosPerPlantPerDay = 3
     public enum Author: String, Codable, Sendable {
         /// ユーザー本人が書いた
         case user
@@ -161,15 +184,24 @@ public struct DiaryEntry: Codable, Sendable, Identifiable, Equatable {
     public var text: String
     /// そのとき植物が言ったこと。引用として添える
     public var quotedDialogue: String?
-    /// 写真への参照。1日に複数枚を持てる（上限は DiaryEntry.maxPhotosPerDay）。
+    /// その日に撮った写真。**どの株を撮ったかを1枚ずつ持つ**（D54）。
+    /// 上限は株ごとに DiaryEntry.maxPhotosPerPlantPerDay。
     /// 実体は PlantStore が持つ。ここでは識別子だけを扱い、
     /// ドメインのモデルに画像データを持ち込まない。
-    public var photoRefs: [String]
+    public var photos: [DiaryPhoto]
+
+    /// 並べる順のままの参照。表示だけが要るところで使う
+    public var photoRefs: [String] { photos.map(\.ref) }
+
+    /// その株の写真が、この日に何枚あるか
+    public func photoCount(of plantId: UUID?) -> Int {
+        photos.filter { $0.plantId == plantId }.count
+    }
     public let author: Author
 
     /// 何も書かれず、写真も無い日。「お休み」として表示する
     public var isRest: Bool {
-        text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && photoRefs.isEmpty
+        text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && photos.isEmpty
     }
 
     public init(
@@ -180,7 +212,7 @@ public struct DiaryEntry: Codable, Sendable, Identifiable, Equatable {
         dayLabel: String? = nil,
         text: String,
         quotedDialogue: String? = nil,
-        photoRefs: [String] = [],
+        photos: [DiaryPhoto] = [],
         author: Author
     ) {
         self.id = id
@@ -190,7 +222,7 @@ public struct DiaryEntry: Codable, Sendable, Identifiable, Equatable {
         self.dayLabel = dayLabel
         self.text = text
         self.quotedDialogue = quotedDialogue
-        self.photoRefs = photoRefs
+        self.photos = photos
         self.author = author
     }
 }
