@@ -12,6 +12,7 @@ struct MyPlantTab: View {
     @State private var path: [UUID] = []
     /// 起動引数で開いた詳細の、最初のページ（動作確認用）。一覧へ戻ったら記録に戻す
     @State private var launchPage = PlantDetailPage.records
+    @State private var launchFilter = GalleryFilter.all
     /// 起動引数による「詳細を開く」を済ませたか。**1回だけ効かせる。**
     /// 一覧が出るたびに効かせると、詳細から戻った瞬間にまた開き、一覧に戻れない
     @State private var launchHandled = false
@@ -32,10 +33,11 @@ struct MyPlantTab: View {
             // navigationDestination と同じスタックに混ぜると、詳細からギャラリーの1枚へ
             // 進んだとき、詳細ごと作り直されて「記録」に戻された
             .navigationDestination(for: UUID.self) { id in
-                PlantDetailView(model: model, plantId: id, initialPage: launchPage)
+                PlantDetailView(model: model, plantId: id, initialPage: launchPage, initialFilter: launchFilter)
             }
             // 動作確認用。`-openDetail YES` で先頭の株の詳細を開き、
-            // `-startDetailPage 1` でそのページから始める（ios/README.md）
+            // `-startDetailPage 1` でそのページから始める。ギャラリーは `-startGalleryFilter 3` で
+            // 絞り込みを選んで始める（ios/README.md）
             .onAppear {
                 guard !launchHandled else { return }
                 launchHandled = true
@@ -44,10 +46,15 @@ struct MyPlantTab: View {
                 else { return }
                 let page = UserDefaults.standard.integer(forKey: "startDetailPage")
                 launchPage = PlantDetailPage(rawValue: page) ?? .records
+                let filter = UserDefaults.standard.integer(forKey: "startGalleryFilter")
+                launchFilter = GalleryFilter(rawValue: filter) ?? .all
                 path = [first]
             }
             .onChange(of: path) { _, path in
-                if path.isEmpty { launchPage = .records }
+                if path.isEmpty {
+                    launchPage = .records
+                    launchFilter = .all
+                }
             }
         }
     }
@@ -160,17 +167,37 @@ struct PlantAvatar: View {
 }
 
 /// 詳細のページ。**番号は起動引数 `-startDetailPage` の値**（ios/README.md）
+///
+/// 写真・動画・パラパラは、ギャラリーの1ページにまとめる。中の絞り込みは下の切り替え（`GalleryFilter`）
 enum PlantDetailPage: Int, CaseIterable, Hashable {
     case records
     case growth
-    case photos
-    case flipbook
+    case gallery
 
     var title: String {
         switch self {
         case .records: "記録"
         case .growth: "育成"
+        case .gallery: "ギャラリー"
+        }
+    }
+}
+
+/// ギャラリーの絞り込み。下の切り替えで選ぶ（育成の時間幅と同じ作り）。
+/// **番号は起動引数 `-startGalleryFilter` の値**（ios/README.md）
+enum GalleryFilter: Int, CaseIterable, Hashable {
+    /// その株の写真・動画・パラパラのすべて
+    case all
+    case photos
+    case movies
+    /// パラパラカメラで撮った写真。開くと再生できる
+    case flipbook
+
+    var title: String {
+        switch self {
+        case .all: "全体"
         case .photos: "写真"
+        case .movies: "動画"
         case .flipbook: "パラパラ"
         }
     }
@@ -185,8 +212,10 @@ struct PlantDetailView: View {
 
     @State private var showRemoveConfirm = false
     @State private var avatarItem: PhotosPickerItem?
-    /// 記録・育成・写真・パラパラの行き来。スライドでも切り替わる
+    /// 記録・育成・ギャラリーの行き来。スライドでも切り替わる
     @State private var page: PlantDetailPage
+    /// ギャラリーの絞り込み（全体・写真・動画・パラパラ）
+    @State private var galleryFilter: GalleryFilter
     /// 上の切り替えの高さ。中身をその下から始めるために測る
     @State private var pickerHeight: CGFloat = 47
     /// ページの中身が、画面の上端からどれだけずれて置かれているか。測って打ち消す
@@ -205,11 +234,17 @@ struct PlantDetailView: View {
 
     private var plant: Plant? { model.store.plant(plantId) }
 
-    /// - Parameter initialPage: 最初に出すページ。ふだんは記録
-    init(model: AppModel, plantId: UUID, initialPage: PlantDetailPage = .records) {
+    /// - Parameters:
+    ///   - initialPage: 最初に出すページ。ふだんは記録
+    ///   - initialFilter: ギャラリーの最初の絞り込み。ふだんは全体
+    init(
+        model: AppModel, plantId: UUID, initialPage: PlantDetailPage = .records,
+        initialFilter: GalleryFilter = .all
+    ) {
         self.model = model
         self.plantId = plantId
         _page = State(initialValue: initialPage)
+        _galleryFilter = State(initialValue: initialFilter)
     }
 
     var body: some View {
@@ -233,9 +268,7 @@ struct PlantDetailView: View {
                 pageContent(GrowthSection(model: model, plantId: plantId), top: top, bottom: bottom)
                     .tag(PlantDetailPage.growth)
                 pageContent(gallery, top: top, bottom: bottom)
-                    .tag(PlantDetailPage.photos)
-                pageContent(flipbook, top: top, bottom: bottom)
-                    .tag(PlantDetailPage.flipbook)
+                    .tag(PlantDetailPage.gallery)
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
             .ignoresSafeArea()
@@ -450,37 +483,75 @@ struct PlantDetailView: View {
     /// 日記が「その日に何があったか」なのに対し、ここは「この子がどう育ったか」。
     /// 目的が違うので、日記を植物で絞り込んだものにはしない（§4.4）。
     ///
-    /// **撮った写真の全部が並ぶ。**パラパラカメラで撮った1枚もここに入る
+    /// **撮った写真の全部が並ぶ。**パラパラカメラで撮った1枚も、ムービー（D58）もここに入る。
+    /// 下の切り替えで「全体・写真・動画・パラパラ」に絞る。パラパラは、以前は別のページだった
     private var gallery: some View {
-        photoGrid(
-            model.store.photos(of: plantId), focus: $galleryFocus, show: $showGalleryStrip,
-            zoom: galleryZoom
+        // パラパラは、開いた先が再生のできる画面になる（右下が削除ではなく再生）。
+        // **同じ写真がギャラリーにも並ぶ**ので、拡大の起点を取り違えないよう見ている写真と名前空間を分ける
+        let flipbook = galleryFilter == .flipbook
+        return photoGrid(
+            galleryPhotos,
+            focus: flipbook ? $flipbookFocus : $galleryFocus,
+            show: flipbook ? $showFlipbookStrip : $showGalleryStrip,
+            zoom: flipbook ? flipbookZoom : galleryZoom
         ) {
-            // 「写真がありません」とは書かない（原則3）
-            emptyPhotos(
-                symbol: "photo.on.rectangle.angled", title: "まだ写真がありません",
-                message: "カメラから撮ると、ここに集まります")
+            galleryEmpty
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // **縦にスクロールしても絞り込みの切り替えは残す**（育成の時間幅と同じ）
+        .safeAreaInset(edge: .bottom) { galleryFilterBar }
+    }
+
+    /// 絞り込んだ写真。新しい順
+    private var galleryPhotos: [PlantPhoto] {
+        switch galleryFilter {
+        case .all: model.store.photos(of: plantId)
+        case .photos: model.store.photos(of: plantId).filter { !$0.movie && !$0.flipbook }
+        case .movies: model.store.photos(of: plantId).filter(\.movie)
+        // **ギャラリーから外していても並べる。**パラパラは毎日の1枚で、欠けさせない
+        case .flipbook: model.store.flipbookPhotos(of: plantId)
         }
     }
 
-    // MARK: - パラパラ
-
-    /// パラパラカメラで撮った写真だけを並べる。作りはギャラリーと同じ。
-    ///
-    /// 毎日同じ角度で1枚ずつ撮ったものなので、開いて再生すると
-    /// パラパラ漫画のように育ちが見える
-    private var flipbook: some View {
-        photoGrid(
-            model.store.flipbookPhotos(of: plantId), focus: $flipbookFocus,
-            show: $showFlipbookStrip, zoom: flipbookZoom
-        ) {
+    /// 「写真がありません」とは書かない（原則3）
+    @ViewBuilder
+    private var galleryEmpty: some View {
+        switch galleryFilter {
+        case .all, .photos:
+            emptyPhotos(
+                symbol: "photo.on.rectangle.angled", title: "まだ写真がありません",
+                message: "カメラから撮ると、ここに集まります")
+        case .movies:
+            emptyPhotos(
+                symbol: "video", title: "まだ動画がありません",
+                message: "カメラの「ムービー」で撮ると、ここに集まります")
+        case .flipbook:
             emptyPhotos(
                 symbol: "square.on.square", title: "まだパラパラがありません",
                 message: "カメラの「パラパラ」で毎日同じ角度から撮ると\nここに集まります")
         }
     }
 
-    /// ギャラリーとパラパラの3列。新しい順
+    /// 下の絞り込み。**育成の時間幅と同じ作り・同じ大きさ**にする（D45）
+    private var galleryFilterBar: some View {
+        let selection = Binding(
+            get: { galleryFilter },
+            set: { next in
+                if next != galleryFilter { Haptics.tick() }
+                galleryFilter = next
+            })
+        return CapsuleTabBar(
+            selection: selection,
+            items: GalleryFilter.allCases.map { .init($0, title: $0.title) },
+            itemWidth: 58,
+            verticalPadding: 6,
+            fontSize: 12.5
+        )
+        // 帯は敷かない。写真の上に浮かせ、タブバーのすぐ上に置く
+        .padding(.vertical, 8)
+    }
+
+    /// ギャラリーの3列。新しい順
     @ViewBuilder
     private func photoGrid<Empty: View>(
         _ photos: [PlantPhoto], focus: Binding<String>, show: Binding<Bool>, zoom: Namespace.ID,

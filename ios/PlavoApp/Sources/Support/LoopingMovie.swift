@@ -5,19 +5,38 @@ import SwiftUI
 ///
 /// **音は無い**（録っていない）。3秒で終わると止まって見えるので、写真アプリの
 /// Live Photos のように繰り返す。開いているあいだ流し続け、画面から外れたら手放す
-struct LoopingMovie: UIViewRepresentable {
+struct LoopingMovie: View {
     let url: URL
     var contentMode: ContentMode = .fill
 
+    /// 画面に出ているか。**覆われた裏や別のタブでは流さない。**
+    /// 全画面へ進んでも手前と奥の2本が回り続け、そのぶん端末が熱くなる
+    @State private var onScreen = false
+    @Environment(\.scenePhase) private var scenePhase
+
+    var body: some View {
+        MovieLayer(url: url, contentMode: contentMode, playing: onScreen && scenePhase == .active)
+            .onAppear { onScreen = true }
+            .onDisappear { onScreen = false }
+    }
+}
+
+/// 動画を1本流す層。流す・止めるは外から決まる
+private struct MovieLayer: UIViewRepresentable {
+    let url: URL
+    var contentMode: ContentMode = .fill
+    let playing: Bool
+
     func makeUIView(context: Context) -> PlayerView {
         let view = PlayerView()
-        view.play(url)
+        view.prepare(url)
         view.playerLayer.videoGravity = gravity
         return view
     }
 
     func updateUIView(_ view: PlayerView, context: Context) {
         view.playerLayer.videoGravity = gravity
+        view.setPlaying(playing)
     }
 
     static func dismantleUIView(_ view: PlayerView, coordinator: ()) {
@@ -34,12 +53,20 @@ struct LoopingMovie: UIViewRepresentable {
         var playerLayer: AVPlayerLayer { layer as! AVPlayerLayer }
         private var looper: AVPlayerLooper?
 
-        func play(_ url: URL) {
+        func prepare(_ url: URL) {
             let player = AVQueuePlayer()
             player.isMuted = true
             looper = AVPlayerLooper(player: player, templateItem: AVPlayerItem(url: url))
             playerLayer.player = player
-            player.play()
+        }
+
+        func setPlaying(_ playing: Bool) {
+            guard let player = playerLayer.player else { return }
+            if playing {
+                if player.rate == 0 { player.play() }
+            } else if player.rate != 0 {
+                player.pause()
+            }
         }
 
         func stop() {

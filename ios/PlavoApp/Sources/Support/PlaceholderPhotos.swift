@@ -109,6 +109,59 @@ enum PlaceholderPhotos {
             day: day, stage: stage, thirsty: thirsty, shot: 0, look: look)
     }
 
+    /// 仮の自分のアイコン（たろう）。**文字は入れない。**
+    /// 丸く切り抜いて出すので、顔を真ん中に描く
+    static func userAvatarJPEG() -> Data {
+        let key = "user-avatar"
+        if let cached = cache[key] { return cached }
+        let size = CGSize(width: 400, height: 400)
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let image = UIGraphicsImageRenderer(size: size, format: format).image { context in
+            drawUserAvatar(context.cgContext, u: size.width)
+        }
+        let data = image.jpegData(compressionQuality: jpegQuality) ?? Data()
+        cache[key] = data
+        return data
+    }
+
+    /// 男の子の顔。若草色の地に、緑のシャツ・茶色の髪・丸い目と頬
+    private static func drawUserAvatar(_ c: CGContext, u: CGFloat) {
+        let skin = rgb(0.99, 0.86, 0.72)
+        c.setFillColor(rgb(0.80, 0.90, 0.72))
+        c.fill(CGRect(x: 0, y: 0, width: u, height: u))
+        // 肩
+        c.setFillColor(rgb(0.36, 0.62, 0.40))
+        c.fillEllipse(in: CGRect(x: u * 0.17, y: u * 0.74, width: u * 0.66, height: u * 0.56))
+        // 首
+        c.setFillColor(skin)
+        c.fill(CGRect(x: u * 0.44, y: u * 0.64, width: u * 0.12, height: u * 0.14))
+        // 耳
+        c.fillEllipse(in: CGRect(x: u * 0.255, y: u * 0.43, width: u * 0.08, height: u * 0.11))
+        c.fillEllipse(in: CGRect(x: u * 0.665, y: u * 0.43, width: u * 0.08, height: u * 0.11))
+        // 髪は顔より先に描き、顔を重ねて上だけを残す
+        c.setFillColor(rgb(0.32, 0.22, 0.15))
+        c.fillEllipse(in: CGRect(x: u * 0.27, y: u * 0.19, width: u * 0.46, height: u * 0.40))
+        c.setFillColor(skin)
+        c.fillEllipse(in: CGRect(x: u * 0.295, y: u * 0.29, width: u * 0.41, height: u * 0.42))
+        // 目
+        c.setFillColor(rgb(0.22, 0.16, 0.12))
+        c.fillEllipse(in: CGRect(x: u * 0.405, y: u * 0.455, width: u * 0.045, height: u * 0.055))
+        c.fillEllipse(in: CGRect(x: u * 0.55, y: u * 0.455, width: u * 0.045, height: u * 0.055))
+        // 頬
+        c.setFillColor(rgb(0.98, 0.62, 0.60, 0.55))
+        c.fillEllipse(in: CGRect(x: u * 0.345, y: u * 0.54, width: u * 0.07, height: u * 0.045))
+        c.fillEllipse(in: CGRect(x: u * 0.585, y: u * 0.54, width: u * 0.07, height: u * 0.045))
+        // 口（下へ弧を描く笑顔）
+        c.setStrokeColor(rgb(0.55, 0.30, 0.24))
+        c.setLineWidth(u * 0.016)
+        c.setLineCap(.round)
+        c.addArc(
+            center: CGPoint(x: u * 0.5, y: u * 0.555), radius: u * 0.055,
+            startAngle: .pi * 0.2, endAngle: .pi * 0.8, clockwise: false)
+        c.strokePath()
+    }
+
     /// パラパラの大きさ。日ごとに描くので枚数が多い。**小さめに描いて、起動を重くしない**
     private static let flipbookSize = CGSize(width: 600, height: 800)
     private static let jpegQuality: CGFloat = 0.8

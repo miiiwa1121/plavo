@@ -88,26 +88,10 @@ struct CameraTab: View {
                 ZStack { flipbookGuide }
                     .animation(.easeInOut(duration: 0.22), value: shutterMode == .flipbook)
 
-                if let center = scene.bubbleScreenPoint, let target = scene.plantScreenPoint,
-                    !line.isEmpty
-                {
-                    AnchoredSpeechBubble(
-                        text: line,
-                        center: center,
-                        target: target,
-                        // 明るい部屋では地を濃くする。弧と同じ実測値を使う
-                        ambientBrightness: scene.ambientBrightness,
-                        // 距離に反比例する倍率。決めているのは SceneController（D50-a）
-                        scale: scene.bubbleScale
-                    )
-                    .id(line)
-                    .transition(.scale(scale: 0.85).combined(with: .opacity))
-                    // **安全領域ごと無視する。**吹き出しの座標は ARView の
-                    // 画面いっぱいの座標系で来る。ここで座標系が縮むと、
-                    // ノッチのぶんだけ下にずれて植物から離れる。
-                    // キーボードで持ち上がらないのも同じ理由（`.all` に含まれる）
-                    .ignoresSafeArea()
-                }
+                // **吹き出しは別のビューで描く。**位置は毎フレーム変わるので、
+                // ここ（カメラ画面の body）で読むと、吹き出しが動くたびに
+                // 画面全体（弧・シャッター・直近の1枚）を作り直すことになる
+                BubbleLayer(scene: scene, line: line)
 
                 if isNaming { namingField }
 
@@ -638,6 +622,8 @@ struct CameraTab: View {
         // 1.5秒押して何も起きないと、押せているのかが分からない
         .onLongPressGesture(minimumDuration: 1.5) {
             showMockControls.toggle()
+            // 開いている間だけ、毎フレームの特徴点を数える
+            scene.wantsDiagnostics = showMockControls
             Haptics.tap()
         }
     }
@@ -935,6 +921,37 @@ private struct RecordingRing: View {
         }
         .onAppear {
             withAnimation(.linear(duration: duration)) { progress = 1 }
+        }
+    }
+}
+
+/// 吹き出しの層。**位置と倍率はここだけで読む。**
+///
+/// 空間に打った点の投影は毎フレーム動く。カメラ画面の body でこれを読むと、
+/// 吹き出しが動くたびに画面全体が作り直される（弧もシャッターも直近の1枚も）。
+/// 読む場所をここに閉じ込めておけば、作り直されるのは吹き出しだけで済む
+private struct BubbleLayer: View {
+    let scene: SceneController
+    let line: String
+
+    var body: some View {
+        if let center = scene.bubbleScreenPoint, let target = scene.plantScreenPoint, !line.isEmpty {
+            AnchoredSpeechBubble(
+                text: line,
+                center: center,
+                target: target,
+                // 明るい部屋では地を濃くする。弧と同じ実測値を使う
+                ambientBrightness: scene.ambientBrightness,
+                // 距離に反比例する倍率。決めているのは SceneController（D50-a）
+                scale: scene.bubbleScale
+            )
+            .id(line)
+            .transition(.scale(scale: 0.85).combined(with: .opacity))
+            // **安全領域ごと無視する。**吹き出しの座標は ARView の
+            // 画面いっぱいの座標系で来る。ここで座標系が縮むと、
+            // ノッチのぶんだけ下にずれて植物から離れる。
+            // キーボードで持ち上がらないのも同じ理由（`.all` に含まれる）
+            .ignoresSafeArea()
         }
     }
 }

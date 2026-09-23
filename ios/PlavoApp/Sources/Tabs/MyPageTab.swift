@@ -41,7 +41,7 @@ struct MyPageTab: View {
                 case .video: photos.filter(\.movie)
                 case nil: photos
                 }
-            // 2本指で列の数が変わる（1・3・5・10・25列）。動きは写真アプリに合わせる
+            // 2本指で列の数が変わる（1・3・5列、その先は25列まで1列刻み）。動きは写真アプリに合わせる
             PhotoLibraryGrid(
                 photos: shown, model: model, focus: $focus, namespace: zoom,
                 onOpen: { photo in

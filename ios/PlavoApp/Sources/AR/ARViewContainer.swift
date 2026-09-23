@@ -16,7 +16,14 @@ struct ARViewContainer: UIViewRepresentable {
 
     func makeUIView(context: Context) -> ARView {
         let view = ARView(frame: .zero, cameraMode: .ar, automaticallyConfigureSession: false)
-        view.renderOptions = [.disablePersonOcclusion, .disableMotionBlur, .disableDepthOfField]
+        // **描画の機能は全部切る。**このビューに 3D のものは1つも置いていない
+        //（吹き出しは SwiftUI で描く）ので、影も環境光もカメラの粒子も要らない。
+        // どれも毎フレーム GPU を使うため、切ったぶん端末の発熱と電池が楽になる
+        view.renderOptions = [
+            .disableCameraGrain, .disableGroundingShadows, .disableMotionBlur,
+            .disableDepthOfField, .disableHDR, .disableFaceMesh,
+            .disablePersonOcclusion, .disableAREnvironmentLighting,
+        ]
         controller.attach(to: view)
         return view
     }

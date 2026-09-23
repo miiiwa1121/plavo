@@ -4,25 +4,25 @@ import UIKit
 
 /// 写真アプリと同じ、2本指で列の数が変わる写真の並び（プロフィール）。
 ///
-/// 写真アプリの動きをそのまま写す。
+/// **枠（格子）と、枠に入れる写真を分けて考える。**枠はズームインしてもアウトしても
+/// 画面いっぱいの1枚の格子のまま、ずれない。**列の数が変わるときに入れ替わるのは、枠の中の写真だけ**
+/// （フェードで入れ替わる。写真が枠から枠へ滑ることはない）。
 ///
-/// | 写真アプリで起きていること | ここでの作り |
+/// | 起きること | 作り |
 /// |---|---|
-/// | 指の開きに付いて、**連続して**大きさが変わり、止めればその大きさで止まる | 行き来している2つの段の並びを、いまのマスの大きさまで拡大・縮小する |
-/// | 指を置いた写真が、**指の下に留まる**（縦も横も） | 2つの段とも、指を置いた点を中心に拡大し、その点を指の下に置く |
-/// | 列の数が変わるところは、写真が滑らず**フェードで入れ替わる** | 2つの段の並びを重ね、遠い段を薄くする（`layers(of:_:)`） |
-/// | 離すと段に収まる。**マスは滑らない** | 行き先の段をその場に置き、離す直前の見え方を上に残して薄くする（`end`） |
-/// | 離すと、**近い段に収まる**。速く開閉したらその向きの次の段 | 離した瞬間の段の位置と速さで行き先を決める |
-/// | 1列・25列の先へは、少し伸びて戻る | はみ出しをゴムのように縮めて見せ、離すと端の段へ戻す |
-/// | 2本指の間は、スクロールもタップも効かない | 2本指の間はスクロールを止め、終わった直後のタップは受けない |
+/// | 指の開きに付いて、**連続して**枠の大きさが変わり、止めればその大きさで止まる | 枠の一辺と間隔を、隣り合う2つの段のあいだで直線でつなぐ（`lattice`） |
+/// | 枠は**いつも1枚の格子**。画面の端から端まで埋まり、重なりもずれもしない | 格子は1つだけ描く。段のあいだでも、枠の一辺・間隔・左端の位置の3つだけで決まる |
+/// | 列の数が変わるところは、**枠は動かず中身の写真がフェードで入れ替わる** | 始めの段と行き先の段の並びの写真を、同じ枠に重ねる（`placements`） |
+/// | 1・3・5 列と、その先の 6〜25 列（1列刻み）では、**画面の両端に揃う** | 拡大の中心を、2つの段の格子が重なる点に置く（`anchorCandidates`）。3列↔5列なら左端・中央・右端、1列ちがいなら左端・右端 |
+/// | つまんだ辺りを中心にズームする | 重なる点のうち、指に一番近い点を中心にする。縦は指の位置を中心にする |
+/// | 離すと、近い段に収まる。速く開閉したらその向きの次の段 | 離した瞬間の段の位置と速さで行き先を決める |
+/// | 収まるときに**枠が動かない** | 行き先の段の格子をその場に置き、離す直前の画面を上に残して薄くする（`end`） |
+/// | 1列の先へは、少し伸びて戻る。**25列の先では何も動かない** | 1列の先だけ、はみ出しをゴムのように縮めて見せる |
+/// | **ズームで変わるのはマスだけ。**見出し（アイコン・名前・数）は動かない | 見出しが見えていたら、中身を上下にずらさない。離したときのフェードも並びの部分だけ |
+/// | 2本指の間は、スクロールが効かない | 2本指の間はスクロールを止める |
 ///
-/// **マスを新しい位置へ滑らせない。**以前は隣り合う2つの段の配置をマスごとに直線でつないでいたが、
-/// マスが行をまたいで階段状に散らばり、**どこでつまんでも同じ崩れ方をしていた**（指の下に留めていたのは縦だけ）。
-/// 離したあとも、行き先の段へアニメーションで寄せていたので、マスが滑って見えた。
-///
-/// **`LazyVGrid` の列の数を変える作りはやめた。**段が変わるたびに並べ直しが走り、
-/// 指に付いてこずにカクついた。ここではマスの位置と大きさを自分で計算し、
-/// 見えている範囲のマスだけを置く。
+/// **離したあと、行き先の段へ大きさをアニメーションで寄せない。**格子のまま寄せても、
+/// 途中の大きさ（15列あたり）で離すと、指から遠い枠ほど大きく動いて、スライドして見えた。
 ///
 /// **2本指の間は、スクロールの位置を動かさない。**中身ごと `offset` でずらして見せ、
 /// 離したところで、ずらした分をスクロールの位置へ移し替える。
@@ -58,7 +58,7 @@ struct PhotoLibraryGrid<Header: View, Empty: View>: View {
     @State private var step = 1
     /// 2本指の最中
     @State private var pinch: Pinch?
-    /// 離した直後。2本指の最中の見え方をその場に残し、上から消していく（`end`）
+    /// 離した直後。離す直前の画面をその場に残し、上から薄くして消す（`end`）
     @State private var fade: Fade?
     @State private var width: CGFloat = 0
     @State private var headerHeight: CGFloat = 0
@@ -83,8 +83,6 @@ struct PhotoLibraryGrid<Header: View, Empty: View>: View {
                     canvas
                 }
             }
-            // 離す直前の見え方。**見出しの上にも重ねる。**並びの中に閉じ込めると、
-            // 離した瞬間に見出しだけがパッと現れる（重ねれば、見出しも下から透けて現れる）
             .overlay(alignment: .topLeading) {
                 if let fade { fadeOverlay(fade) }
             }
@@ -118,20 +116,16 @@ struct PhotoLibraryGrid<Header: View, Empty: View>: View {
         .task(id: photos.map(\.ref)) { await prewarm() }
     }
 
-    // MARK: - マス
+    // MARK: - 枠
 
     private var canvas: some View {
-        let layout = self.layout
-        let layers = self.layers(of: pinch, layout)
-        let height =
-            pinch.map { max($0.startHeight, contentHeight($0, layout)) }
-            ?? layout.height(level: CGFloat(step))
+        let lattice = self.lattice
+        let items = visibleItems(lattice, placements: placements(for: pinch))
         // 1列で落ち着いたときだけ大きい絵にする。動いている最中に開き直さない
         let sharp = pinch == nil && fade == nil && step == 0
-        let items = visibleItems(layout, layers: layers)
 
         return Color.clear
-            .frame(height: height)
+            .frame(height: max(pinch?.startHeight ?? 0, lattice.height))
             .frame(maxWidth: .infinity)
             .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
             .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: {
@@ -150,91 +144,125 @@ struct PhotoLibraryGrid<Header: View, Empty: View>: View {
                     }
                 }
             }
-            // **並びの上端より上へ出たマスは見せない。**2つの段を重ねている間、
-            // 片方の段の上のほうの行が見出しに重なる
             .clipped()
     }
 
+    /// 並びの格子。**枠はすべてこの格子の上に乗る。**
+    ///
+    /// 列 `k`・行 `r` の枠は、左上が `(originX + k × pitch, r × pitch)`、一辺が `side`。
+    /// 格子を決めるのはこの3つ（と高さ）だけなので、どの大きさでも枠どうしがずれない
+    private struct Lattice {
+        var pitch: CGFloat
+        var side: CGFloat
+        /// 0 列目の左端（グリッドの座標）。段に収まっているときは 0
+        var originX: CGFloat
+        var height: CGFloat
+    }
+
+    /// 枠に入れた写真1枚。**2本指の最中は、1つの枠に2枚まで重なる**（始めの段と行き先の段の写真）
     private struct Item {
-        /// 段ごとに別のマスにする。**2つの段を重ねている間は、同じ写真が2枚ある**
         let id: String
-        /// 開いた写真から戻る先（D46-a）。落ち着いている段のマスだけが写真の参照名を持つ
+        /// 開いた写真から戻る先（D46-a）。落ち着いているときの写真だけが写真の参照名を持つ
         let sourceID: String
         let photo: PlantPhoto
         let frame: CGRect
         let opacity: CGFloat
     }
 
-    /// 並べる段。落ち着いているときは1つ、2本指の最中は行き来している2つ。
-    private struct Layer {
-        /// 段の添字（`PhotoGridLayout.steps`）
-        let step: Int
+    /// 枠への写真の入れ方。列の数が `columns` の段で、格子の `k` 列目をその段の `k + shift` 列目として数える
+    private struct Placement {
+        let columns: Int
+        let shift: Int
         let opacity: CGFloat
-        /// この段の並びに掛ける倍率。**どの段も、いまのマスの大きさに揃える**
-        let scale: CGFloat
-        /// 指を置いた点（この段の並びでの、グリッドの座標）。拡大の中心
-        let origin: CGPoint
+        /// 写真の見分け（同じ写真が2つの入れ方で別の枠に入る）
+        let tag: String
     }
 
-    /// 2本指の最中は、**行き来している2つの段の並びを重ねる**（写真アプリと同じ）。
+    /// 枠への写真の入れ方。落ち着いているときは、その段の並びどおりに1枚ずつ。
     ///
-    /// どちらの段も、いまのマスの大きさまで拡大・縮小し、指を置いた点を指の下に揃える。
-    /// 指を置いた写真は両方の段で同じ位置・同じ大きさになるので、入れ替わって見えない。
-    /// ほかの写真は、**段のあいだで古い並びから新しい並びへフェードで入れ替わる。**
+    /// **2本指の最中は、始めの段（from）の並びと行き先の段（to）の並びの2枚を、同じ枠に重ねる。**
+    /// 枠は格子の上から動かさず、進み具合に合わせて**中身の写真だけをフェードで入れ替える。**
+    /// 行き先の段の k 列目は、格子の上では `k − shift` 列目にある（拡大の中心が重なる点のため、整数になる）。
     ///
     /// 濃さは、近い段を不透明に保ち、遠い段だけを薄くする（進み具合 0.5 で両方とも不透明）。
     /// 両方を同時に薄くすると、重なったところが地の色に透けて白っぽくなる
-    private func layers(of pinch: Pinch?, _ layout: PhotoGridLayout) -> [Layer] {
+    private func placements(for pinch: Pinch?) -> [Placement] {
         guard let pinch else {
-            return [Layer(step: step, opacity: 1, scale: 1, origin: .zero)]
+            return [Placement(columns: PhotoGridLayout.steps[step], shift: 0, opacity: 1, tag: "a")]
         }
-        let (from, to, t) = Self.segment(pinch.level)
-        let side = currentSide(pinch, layout)
-        func layer(_ s: Int, opacity: CGFloat) -> Layer {
-            Layer(
-                step: s, opacity: opacity,
-                scale: side / layout.side(columns: PhotoGridLayout.steps[s]),
-                origin: anchorPoint(pinch, layout: layout, level: CGFloat(s)))
+        let (from, to, t) = pinch.segment
+        let a = PhotoGridLayout.steps[from]
+        var result = [Placement(columns: a, shift: 0, opacity: min(1, 2 * (1 - t)), tag: "a")]
+        if to != from, t > 0 {
+            let b = PhotoGridLayout.steps[to]
+            let anchor = pinch.anchors[from] ?? 0
+            let shift = Int((anchor * (1 / pitch(b) - 1 / pitch(a))).rounded())
+            result.append(Placement(columns: b, shift: shift, opacity: min(1, 2 * t), tag: "b"))
         }
-        // 重ねる順は段の順に決めておく。途中で入れ替えると、不透明どうしが重なった瞬間に跳ぶ
-        var result = [layer(from, opacity: min(1, 2 * (1 - t)))]
-        if to != from, t > 0 { result.append(layer(to, opacity: min(1, 2 * t))) }
         return result
     }
 
-    /// いまのマスの大きさ。指の開きと同じ比で変わる。1列・25列の先はゴムのように伸びにくくする
-    private func currentSide(_ pinch: Pinch, _ layout: PhotoGridLayout) -> CGFloat {
-        layout.side(level: pinch.level) * exp(Self.rubber(pinch.overshoot, limit: 0.3))
+    private var lattice: Lattice { lattice(for: pinch) }
+
+    /// 段に収まっているときは、その段の格子そのもの。2本指の最中は、2つの段のあいだを直線でつなぐ。
+    ///
+    /// **横は、拡大の中心 `anchorX` を動かさずに縮める・広げる。**中心は2つの段の格子が重なる点なので、
+    /// どちらの段に着いたときも、画面の両端にぴったり揃う（`anchorCandidates`）
+    private func lattice(for pinch: Pinch?) -> Lattice {
+        let layout = self.layout
+        guard let pinch else {
+            let columns = PhotoGridLayout.steps[step]
+            return Lattice(
+                pitch: pitch(columns), side: layout.side(columns: columns), originX: 0,
+                height: layout.height(columns: columns))
+        }
+        let (from, to, t) = pinch.segment
+        let a = PhotoGridLayout.steps[from]
+        let b = PhotoGridLayout.steps[to]
+        // 1列の先は、ゴムのように伸びにくくする。
+        // **25列の先は何もしない。**それより小さい段は無いので、つまんでも枠を動かさない
+        // （縮めて見せると、一番下の行が増えたり減ったりしてぶれた）
+        let stretch = pinch.overshoot > 0 ? exp(Self.rubber(pinch.overshoot, limit: 0.3)) : 1
+        let p = lerp(pitch(a), pitch(b), t) * stretch
+        let side = lerp(layout.side(columns: a), layout.side(columns: b), t) * stretch
+        let anchor = pinch.anchors[from] ?? 0
+        // 中心の、始めの段（from）の格子での位置を保ったまま、刻みだけを変える
+        let originX = anchor - anchor / pitch(a) * p
+        let height = lerp(layout.height(columns: a), layout.height(columns: b), t) * stretch
+        return Lattice(pitch: p, side: side, originX: originX, height: height)
     }
 
-    /// その段でのマスの置き場所
-    private func frame(_ index: Int, in layer: Layer, layout: PhotoGridLayout) -> CGRect {
-        let f = layout.frame(index, columns: PhotoGridLayout.steps[layer.step])
-        guard let pinch else { return f }
-        let k = layer.scale
-        return CGRect(
-            x: pinch.anchorX + (f.minX - layer.origin.x) * k,
-            y: pinch.anchorY + (f.minY - layer.origin.y) * k,
-            width: f.width * k, height: f.height * k)
-    }
-
-    /// 置く範囲にかかるマスだけ。**全部は置かない。**写真が増えても、描くのは見えている分だけ
-    private func visibleItems(_ layout: PhotoGridLayout, layers: [Layer]) -> [Item] {
-        guard layout.width > 0 else { return [] }
+    /// 置く範囲にかかる枠の写真だけ。**全部は置かない。**横は画面の幅にかかる列、縦は置く範囲にかかる行。
+    /// 写真の無い枠（最後の行の空き）には何も置かない
+    private func visibleItems(_ lattice: Lattice, placements: [Placement]) -> [Item] {
+        guard width > 0, lattice.pitch > 0 else { return [] }
+        let p = lattice.pitch
+        let firstColumn = Int(((-lattice.originX - lattice.side) / p).rounded(.down)) + 1
+        let lastColumn = Int(((width - lattice.originX) / p).rounded(.up)) - 1
+        let rows = placements.map { (photos.count + $0.columns - 1) / $0.columns }.max() ?? 0
         let range = canvasBand
+        let firstRow = max(0, Int(((range.lowerBound - lattice.side) / p).rounded(.down)) + 1)
+        let lastRow = min(rows - 1, Int((range.upperBound / p).rounded(.down)))
+        guard firstColumn <= lastColumn, firstRow <= lastRow else { return [] }
         var items: [Item] = []
-        for layer in layers {
-            for (index, photo) in photos.enumerated() {
-                let frame = frame(index, in: layer, layout: layout)
-                guard frame.maxY >= range.lowerBound, frame.minY <= range.upperBound,
-                    // 拡大した段は、画面の横へも大きくはみ出す
-                    frame.maxX > 0, frame.minX < layout.width
-                else { continue }
-                let id = "\(layer.step)|\(photo.ref)"
-                items.append(
-                    Item(
-                        id: id, sourceID: layer.step == step ? photo.ref : id, photo: photo, frame: frame,
-                        opacity: layer.opacity))
+        // 入れ方ごとにまとめて置く。**後の入れ方（行き先の段）が上に重なる**
+        for placement in placements {
+            for r in firstRow...lastRow {
+                for k in firstColumn...lastColumn {
+                    let column = k + placement.shift
+                    guard column >= 0, column < placement.columns else { continue }
+                    let index = r * placement.columns + column
+                    guard index < photos.count else { continue }
+                    let photo = photos[index]
+                    let id = placement.tag + "|" + photo.ref
+                    items.append(
+                        Item(
+                            id: id, sourceID: pinch == nil ? photo.ref : id, photo: photo,
+                            frame: CGRect(
+                                x: lattice.originX + CGFloat(k) * p, y: CGFloat(r) * p,
+                                width: lattice.side, height: lattice.side),
+                            opacity: placement.opacity))
+                }
             }
         }
         return items
@@ -243,20 +271,30 @@ struct PhotoLibraryGrid<Header: View, Empty: View>: View {
     /// 置く範囲を、グリッドの座標に直す。**ずらしている分も足す。**
     /// 中身を上へずらすと、見えるのはグリッドのもっと下になる
     private var canvasBand: ClosedRange<CGFloat> {
-        let shifts: [CGFloat] =
-            if let pinch { [pinch.dy] } else { [0] }
-        let lower = shifts.map { band.lowerBound - headerHeight - $0 }.min() ?? 0
-        let upper = shifts.map { band.upperBound - headerHeight - $0 }.max() ?? 0
-        return lower...upper
+        let shift = pinch?.dy ?? 0
+        return (band.lowerBound - headerHeight - shift)...(band.upperBound - headerHeight - shift)
     }
 
-    /// 2本指の最中の、並びの一番下（グリッドの座標）。重ねている段のうち、下へ長いほう
-    private func contentHeight(_ pinch: Pinch, _ layout: PhotoGridLayout) -> CGFloat {
-        layers(of: pinch, layout).map { layer in
-            pinch.anchorY
-                + (layout.height(columns: PhotoGridLayout.steps[layer.step]) - layer.origin.y) * layer.scale
-        }.max() ?? pinch.startHeight
+    /// 枠の刻み（一辺＋間隔）
+    private func pitch(_ columns: Int) -> CGFloat {
+        layout.side(columns: columns) + PhotoGridLayout.spacing(columns: columns)
     }
+
+    /// 2つの段の格子が**重なる点**（グリッドの座標の x）。ここを中心に縮める・広げると、
+    /// 行き先の段に着いたときも、枠が画面の両端に揃う。
+    ///
+    /// 点 x が、始めの段で `x / 刻みA` 列目、行き先の段で `x / 刻みB` 列目にあるとき、
+    /// 両者の差が整数なら重なっている。1列↔3列・3列↔5列では左端・中央・右端、1列ちがい（5列より先）では左端と右端
+    private func anchorCandidates(from: Int, to: Int) -> [CGFloat] {
+        let a = PhotoGridLayout.steps[from]
+        let b = PhotoGridLayout.steps[to]
+        let d = 1 / pitch(b) - 1 / pitch(a)
+        guard a != b, d > 0 else { return [0, width / 2, width] }
+        let count = Int((width * d).rounded())
+        return (0...max(0, count)).map { min(CGFloat($0) / d, width) }
+    }
+
+    private func lerp(_ a: CGFloat, _ b: CGFloat, _ t: CGFloat) -> CGFloat { a + (b - a) * t }
 
     /// 段の位置を、つなぐ2つの段（添字）と進み具合に分ける
     private static func segment(_ level: CGFloat) -> (from: Int, to: Int, progress: CGFloat) {
@@ -268,156 +306,157 @@ struct PhotoLibraryGrid<Header: View, Empty: View>: View {
     // MARK: - 2本指
 
     private struct Pinch {
-        /// 指を置いた写真と、その写真の中の指の位置（0〜1）
-        var anchor: Int
-        var unit: CGPoint
-        /// 始めたときのグリッドの左端（画面の座標）と、指と、指を置いた点の横のずれ
-        var baseX: CGFloat
-        var leadX: CGFloat
-        /// 指と、指を置いた点のずれ。見出しの上から始めたときに、中身が跳ばないように
-        var lead: CGFloat
-        /// 指を置いた点を置く位置（グリッドの座標）。**横は指に付いて動く。**
-        /// 縦で指の下に留めるのは、中身ごとずらす `dy` の側（見出しも一緒に動かすため）
-        var anchorX: CGFloat
-        var anchorY: CGFloat
-        /// 始めたときのグリッドの上端（画面の座標）。最中はスクロールを止めているので動かない
-        var base: CGFloat
+        /// 指を置いた点の縦の位置（始めたときの段の、**行の刻みで数えた**位置）。
+        /// 格子は上端を中心に縮む・広がるので、この点が指の下に来るように中身ごとずらす
+        var rowPosition: CGFloat
+        /// 始めたときのグリッドの左上（画面の座標）。最中はスクロールを止めているので動かない
+        var base: CGPoint
         var startScale: CGFloat
         var startSide: CGFloat
         var startHeight: CGFloat
         var scrollY: CGFloat
-        /// スクロールできる一番下の位置。**0 で切らない。**中身が画面より短いと負になる。
-        /// 切ってから高さの差を足すと、行き先の一番下を大きく見積もり、吸い付いたあとに押し戻される
+        /// スクロールできる一番下の位置。**0 で切らない。**中身が画面より短いと負になる
         var rawMaxScrollY: CGFloat
         var viewport: CGFloat
         var level: CGFloat
         var overshoot: CGFloat = 0
         var finger: CGPoint
         var dy: CGFloat = 0
+        /// 段のあいだごとの、拡大の中心（グリッドの座標の x）。**そのあいだに入ったときの指で決め、
+        /// 出るまで変えない。**途中で変えると、格子が横に跳ぶ
+        var anchors: [Int: CGFloat] = [:]
+        /// 始めたとき、見出し（アイコン・名前・数）が見えていたか。
+        /// **見えていたら、中身を上下にずらさない。**ズームで変わるのはマスだけにする
+        var holdsHeader: Bool
+
+        var segment: (from: Int, to: Int, progress: CGFloat) { PhotoLibraryGrid.segment(level) }
     }
 
-    /// 離した直後の見え方。**マスは動かさない。**離す直前のマスをその場に残し、薄くして消す
+    /// 離した直後に残しておく、離す直前の画面
     private struct Fade {
         let id = UUID()
         var items: [Item]
-        /// 離す直前の、並びの上端（グリッドの座標）。これより上は、そのときも見えていなかった
-        var top: CGFloat
+        /// 離す直前の中身の上端が、離したあとの中身ではどこに来るか。
+        /// スクロールの位置を移しても、**画面の同じ場所に留める**ためのずらし
+        var shift: CGFloat
         var opacity: CGFloat = 1
     }
 
-    /// 離す直前のマスを、見出しとグリッドをまとめた中身の上に置く
+    /// 離す直前の並びを、そのまま上に重ねる。**枠の間の余白（地の色）も一緒に残す。**
+    /// 枠だけを残すと、枠の間の線が離した瞬間にパッと変わる。
+    ///
+    /// **重ねるのは並びの部分だけ。**見出し（アイコン・名前・数）はズームで動かないので、重ねない
     private func fadeOverlay(_ fade: Fade) -> some View {
         ZStack(alignment: .topLeading) {
+            Color(.systemBackground)
             ForEach(fade.items, id: \.id) { item in
                 LibraryTile(ref: item.photo.ref, model: model, sharp: false)
                     .frame(width: item.frame.width, height: item.frame.height)
                     .opacity(item.opacity)
-                    .offset(x: item.frame.minX, y: headerHeight + item.frame.minY)
+                    .offset(x: item.frame.minX, y: fade.shift + headerHeight + item.frame.minY)
             }
         }
+        // **切り抜きは、中身全体の大きさで掛ける。**枠の入れ物は1マスの大きさしかなく、
+        // そのまま切ると1列ぶんしか残らなかった
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        // 離す直前に並びの上端で切れていたところは、そのまま切る
+        // 見出しより上には掛けない。離す直前に並びの上端で切れていたところも、そのまま切る
         .mask(alignment: .topLeading) {
-            Rectangle().padding(.top, max(0, headerHeight + fade.top)).padding(.bottom, -10_000)
+            Rectangle()
+                .padding(.top, headerHeight + max(0, fade.shift))
+                .padding(.bottom, -10_000)
         }
         .opacity(fade.opacity)
         .allowsHitTesting(false)
     }
 
     private func begin(scale: CGFloat, at location: CGPoint) {
-        // 消している最中に次の2本指が来たら、残していた見え方はすぐに消す
+        // 薄くしている最中に次の2本指が来たら、残していた画面はすぐに消す
         fade = nil
         guard width > 0, !photos.isEmpty else { return }
-        let layout = self.layout
-        let level = CGFloat(step)
         let canvas = box.canvasGlobal
-        let point = CGPoint(x: location.x - canvas.minX, y: location.y - canvas.minY)
-        guard let anchor = layout.index(nearest: point, level: level) else { return }
-        let frame = layout.frame(anchor, level: level)
-        let unit = CGPoint(
-            x: min(max((point.x - frame.minX) / frame.width, 0), 1),
-            y: min(max((point.y - frame.minY) / frame.height, 0), 1))
-        let origin = CGPoint(x: frame.minX + unit.x * frame.width, y: frame.minY + unit.y * frame.height)
+        let columns = PhotoGridLayout.steps[step]
         let metrics = box.metrics
-        pinch = Pinch(
-            anchor: anchor, unit: unit,
-            baseX: canvas.minX, leadX: point.x - origin.x, lead: point.y - origin.y,
-            anchorX: origin.x, anchorY: origin.y,
-            base: canvas.minY, startScale: scale, startSide: layout.side(level: level),
-            startHeight: layout.height(level: level),
+        var next = Pinch(
+            rowPosition: (location.y - canvas.minY) / pitch(columns),
+            base: canvas.origin, startScale: scale, startSide: layout.side(columns: columns),
+            startHeight: layout.height(columns: columns),
             scrollY: metrics.y, rawMaxScrollY: metrics.rawMaxY, viewport: metrics.visibleHeight,
-            level: level, finger: location)
+            level: CGFloat(step), finger: location, holdsHeader: metrics.y < headerHeight)
+        chooseAnchor(&next)
+        pinch = next
+    }
+
+    /// いまの段のあいだに、まだ中心が決まっていなければ、指に一番近い重なる点に決める
+    private func chooseAnchor(_ pinch: inout Pinch) {
+        let (from, to, _) = pinch.segment
+        guard pinch.anchors[from] == nil else { return }
+        let x = pinch.finger.x - pinch.base.x
+        pinch.anchors[from] =
+            anchorCandidates(from: from, to: to).min { abs($0 - x) < abs($1 - x) } ?? 0
     }
 
     private func update(scale: CGFloat, at location: CGPoint) {
         guard var pinch else { return }
-        let layout = self.layout
         let found = layout.level(forSide: pinch.startSide * scale / pinch.startScale)
         pinch.level = found.level
         pinch.overshoot = found.overshoot
         pinch.finger = location
-        pinch.anchorX = location.x - pinch.baseX - pinch.leadX
-        // 縦は、2つの段それぞれで**指を置いた点がグリッドの上端からどれだけ下か**を混ぜる。
-        // どちらの段の上端も、グリッドの上端から大きく離れないように。
-        //
-        // **列の多い段（`to`）に早めに合わせ切る**（進み具合 0.5 で合わせ終える）。
-        // 列の多い段ほど上端が下がり、合わせ切るまではその上に隙間が空く。
-        // 前半は列の少ない段が不透明で隙間を覆うが、後半は薄くなって、隙間が白く透けていた
-        let (from, to, t) = Self.segment(found.level)
-        let side = currentSide(pinch, layout)
-        func depth(_ s: Int) -> CGFloat {
-            anchorPoint(pinch, layout: layout, level: CGFloat(s)).y * side
-                / layout.side(columns: PhotoGridLayout.steps[s])
+        chooseAnchor(&pinch)
+        let lattice = lattice(for: pinch)
+        // 見出しが見えていたら、ずらさない。並びは見出しのすぐ下を上端にして、大きさだけが変わる
+        if pinch.holdsHeader {
+            pinch.dy = 0
+            self.pinch = pinch
+            return
         }
-        pinch.anchorY = depth(from) + (depth(to) - depth(from)) * min(1, 2 * t)
-        // 指を置いた点が指の下に来るだけ、中身をずらす
-        let dy = location.y - pinch.base - pinch.anchorY - pinch.lead
-        // 上端・下端の先は、スクロールと同じくゴムのように縮めて見せる
-        let maxY = max(0, pinch.rawMaxScrollY + contentHeight(pinch, layout) - pinch.startHeight)
-        let shown = Self.rubberBand(pinch.scrollY - dy, min: 0, max: maxY, dimension: pinch.viewport)
+        // 見出しが画面の外なら、指を置いた点が指の下に来るだけ中身をずらす。
+        // **ずらしても見出しは画面に入れない**（上端は見出しの下まで）
+        let dy = location.y - pinch.base.y - pinch.rowPosition * lattice.pitch
+        let lower = headerHeight
+        let upper = max(lower, pinch.rawMaxScrollY + lattice.height - pinch.startHeight)
+        // 下端の先は、スクロールと同じくゴムのように縮めて見せる
+        let shown = Self.rubberBand(
+            max(lower, pinch.scrollY - dy), min: lower, max: upper, dimension: pinch.viewport)
         pinch.dy = pinch.scrollY - shown
         self.pinch = pinch
     }
 
     private func end(velocity: CGFloat) {
         guard let pinch else { return }
-        let layout = self.layout
         let speed = velocity.isFinite ? velocity : 0
-        // 行き先の段。端の先なら端へ。速く開閉したらその向きの次の段、そうでなければ近い段
-        var target: Int
-        if pinch.overshoot > 0 {
-            target = 0
-        } else if pinch.overshoot < 0 {
-            target = Self.maxStep
-        } else if speed > 0.8 {
-            target = Int(pinch.level.rounded(.up)) - 1
-        } else if speed < -0.8 {
-            target = Int(pinch.level.rounded(.down)) + 1
+        let (from, to, t) = pinch.segment
+        // 行き先の段。端の先なら端へ。速く開閉したらその向きの段、そうでなければ近い段
+        let target: Int
+        if pinch.overshoot > 0 || speed > 0.8 {
+            target = from
+        } else if pinch.overshoot < 0 || speed < -0.8 {
+            target = to
         } else {
-            target = Int(pinch.level.rounded())
+            target = t < 0.5 ? from : to
         }
-        target = min(max(target, 0), Self.maxStep)
 
-        // 行き先でも、指を置いた写真が最後の指の位置に来るように。ただし上端・下端は越えない
-        let level = CGFloat(target)
-        let origin = anchorPoint(pinch, layout: layout, level: level)
-        let desired = pinch.scrollY - (pinch.finger.y - pinch.base - origin.y - pinch.lead)
-        let maxY = max(0, pinch.rawMaxScrollY + layout.height(level: level) - pinch.startHeight)
+        // 行き先でも、指を置いた点が指の下に来るように。ただし上端・下端は越えない。
+        // **見出しが見えていたら、スクロールの位置はそのまま**（見出しを動かさない）
+        let columns = PhotoGridLayout.steps[target]
+        let desired =
+            pinch.holdsHeader
+            ? pinch.scrollY
+            : max(
+                headerHeight,
+                pinch.scrollY - (pinch.finger.y - pinch.base.y - pinch.rowPosition * pitch(columns)))
+        let maxY = max(0, pinch.rawMaxScrollY + layout.height(columns: columns) - pinch.startHeight)
         // 一番下は少し手前に収める。高さの端数で越えると、スクロールの側で端へ寄せ直される
         let scrollY = min(max(desired, 0), max(0, maxY - 0.5))
 
-        // **行き先の段は、その場に置く。動かして寄せない。**
-        // 離す直前の見え方を上に重ねて残し、薄くして消す。マスは滑らず、中身だけが入れ替わる。
-        //
-        // 残す見え方は、スクロールの位置を移したあとも**画面の同じ場所に留まる**ようにずらしておく
-        let dy = pinch.scrollY - scrollY
-        let shift = pinch.dy - dy
-        let frozen = visibleItems(layout, layers: layers(of: pinch, layout)).map { item in
-            Item(
-                id: "fade|" + item.id, sourceID: "fade|" + item.id, photo: item.photo,
-                frame: item.frame.offsetBy(dx: 0, dy: shift), opacity: item.opacity)
-        }
-        let next = Fade(items: frozen, top: shift)
+        // **行き先の段は、その場に置く。大きさを寄せていかない。**
+        // 離す直前の画面を上に重ねて残し、薄くして消す。枠は動かず、見え方だけが入れ替わる
+        let next = Fade(
+            items: visibleItems(lattice(for: pinch), placements: placements(for: pinch)).map {
+                Item(
+                    id: "fade|" + $0.id, sourceID: "fade|" + $0.id, photo: $0.photo, frame: $0.frame,
+                    opacity: $0.opacity)
+            },
+            shift: pinch.dy - (pinch.scrollY - scrollY))
 
         lastPinchEnd = .now
         // **同じ更新の中で**、ずらしを戻し、段を移し、スクロールを動かす
@@ -429,10 +468,10 @@ struct PhotoLibraryGrid<Header: View, Empty: View>: View {
             fade = next
             position.scrollTo(y: scrollY)
             // 置く範囲も、移った先に合わせて**同じ更新で**変える。
-            // スクロールの知らせを待つと、1コマだけマスが欠ける
+            // スクロールの知らせを待つと、1コマだけ枠が欠ける
             band = Self.band(y: scrollY, height: box.metrics.visibleHeight)
         }
-        // 置いた次の更新で薄くし始める。同じ更新で薄くすると、残した見え方が最初から薄い
+        // 置いた次の更新で薄くし始める。同じ更新で薄くすると、残した画面が最初から薄い
         Task { @MainActor in
             withAnimation(.easeOut(duration: 0.25)) {
                 if fade?.id == next.id { fade?.opacity = 0 }
@@ -440,12 +479,6 @@ struct PhotoLibraryGrid<Header: View, Empty: View>: View {
                 if fade?.id == next.id { fade = nil }
             }
         }
-    }
-
-    private func anchorPoint(_ pinch: Pinch, layout: PhotoGridLayout, level: CGFloat) -> CGPoint {
-        let frame = layout.frame(pinch.anchor, level: level)
-        return CGPoint(
-            x: frame.minX + pinch.unit.x * frame.width, y: frame.minY + pinch.unit.y * frame.height)
     }
 
     // MARK: - タップ
@@ -479,7 +512,8 @@ struct PhotoLibraryGrid<Header: View, Empty: View>: View {
     private func prewarm() async {
         for photo in photos {
             if Task.isCancelled { return }
-            _ = await model.store.thumbnailInBackground(photo.ref)
+            // 先回りの下ごしらえなので、画面の仕事の邪魔をしない優先度で
+            _ = await model.store.thumbnailInBackground(photo.ref, priority: .utility)
         }
     }
 

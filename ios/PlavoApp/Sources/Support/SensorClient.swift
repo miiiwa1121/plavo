@@ -40,6 +40,17 @@ final class SensorClient {
 
     /// ガジェットは1秒に1回送る想定なので、こちらも1秒で見に行く
     private let interval: Duration = .seconds(1)
+    /// 失敗が続いたときの、いちばん長い間隔。
+    ///
+    /// **繋がらない場所で1秒ごとに試し続けない。**通信のたびに電波を起こすので、
+    /// サーバーの無いところでアプリを開いているだけで端末が温まり、電池も減る
+    private let maxInterval: Duration = .seconds(15)
+
+    /// 次に見に行くまでの間。失敗のたびに倍にして、繋がったら1秒に戻す
+    private var pollInterval: Duration {
+        guard consecutiveFailures > 0 else { return interval }
+        return min(maxInterval, interval * (1 << min(consecutiveFailures - 1, 4)))
+    }
     /// 連続でこの回数失敗したら「失敗」にする。一時的な取りこぼしで切り替えない
     private let failureTolerance = 3
     private var consecutiveFailures = 0
@@ -65,7 +76,7 @@ final class SensorClient {
             while !Task.isCancelled {
                 guard let self else { return }
                 await self.poll(onReading: onReading)
-                try? await Task.sleep(for: self.interval)
+                try? await Task.sleep(for: self.pollInterval)
             }
         }
     }

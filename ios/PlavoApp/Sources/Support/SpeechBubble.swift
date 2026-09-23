@@ -317,7 +317,21 @@ enum BubbleMetrics {
     /// `frame(maxWidth:)` では短いセリフにも上限いっぱいの風船が付く
     /// （最大幅の枠は、提案された幅をそのまま取る）。
     /// **測ってから決める。**「……」には小さな風船が付く。
+    @MainActor
     static func textWidth(for text: String) -> CGFloat {
+        if let hit = widthCache[text] { return hit }
+        let width = measureWidth(text)
+        widthCache[text] = width
+        return width
+    }
+
+    /// **測った大きさは覚えておく。**吹き出しは毎フレーム描き直される（空間に打った点を
+    /// 投影して位置を出すため）ので、そのたびに測ると UIKit の文字組みが毎フレーム走る。
+    /// セリフは決まったプールから出るので、覚える数は高が知れている
+    @MainActor private static var widthCache: [String: CGFloat] = [:]
+    @MainActor private static var layoutCache: [String: CGSize] = [:]
+
+    private static func measureWidth(_ text: String) -> CGFloat {
         let font = measuringFont
         let width = text
             .components(separatedBy: "\n")
@@ -335,7 +349,16 @@ enum BubbleMetrics {
     ///
     /// **描く前に分かるようにしておく。**置き場所（D50）と倍率（D50-a）は
     /// 本体の大きさから決まるので、描いてから測るのでは順番が回らない。
+    @MainActor
     static func layoutSize(for text: String) -> CGSize {
+        if let hit = layoutCache[text] { return hit }
+        let size = measureLayout(text)
+        layoutCache[text] = size
+        return size
+    }
+
+    @MainActor
+    private static func measureLayout(_ text: String) -> CGSize {
         let width = textWidth(for: text)
         let style = NSMutableParagraphStyle()
         style.lineSpacing = lineSpacing
@@ -354,7 +377,7 @@ enum BubbleMetrics {
     ///
     /// 本体そのものの高さを基準にすると、**2行のセリフだけ文字が小さくなる。**
     /// 1行ぶんを基準に置けば、行数が増えたぶんは素直に縦へ伸びる
-    static let singleLineHeight: CGFloat = layoutSize(for: "あ").height
+    @MainActor static let singleLineHeight: CGFloat = layoutSize(for: "あ").height
 
     private static let measuringFont: UIFont = {
         let base = UIFont.systemFont(ofSize: fontSize, weight: .semibold)

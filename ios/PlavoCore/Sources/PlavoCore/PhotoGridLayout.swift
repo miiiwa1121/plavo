@@ -3,7 +3,9 @@ import Foundation
 
 /// 写真アプリと同じ、正方形のマスを並べるグリッドの配置（プロフィールのすべての写真）。
 ///
-/// **列の数を段で持つ。**1・3・5・10・25 列。段のあいだは小数の段の位置 `level` で表す
+/// **列の数を段で持つ。**1・3・5 列は決まった段。**その先は 6〜25 列を1列刻みで持つ**
+/// （離したところの大きさに一番近い列の数に収まる。10・25 列へ寄せない）。
+/// 段のあいだは小数の段の位置 `level` で表す
 /// （1.4 なら、3列の配置から5列の配置へ 40% 進んだところ）。
 ///
 /// 段の位置は、**指の下のマスの一辺が指の開きと同じ比で変わる**ように引く
@@ -15,7 +17,7 @@ import Foundation
 public struct PhotoGridLayout: Equatable, Sendable {
 
     /// 列の数の段。広げると左（大きく）、つまむと右（小さく）へ進む
-    public static let steps = [1, 3, 5, 10, 25]
+    public static let steps = [1, 3, 5] + Array(6...25)
     public static var maxLevel: CGFloat { CGFloat(steps.count - 1) }
 
     public var width: CGFloat

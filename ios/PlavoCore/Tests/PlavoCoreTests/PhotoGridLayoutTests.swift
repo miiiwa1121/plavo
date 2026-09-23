@@ -22,6 +22,12 @@ final class PhotoGridLayoutTests: XCTestCase {
         XCTAssertEqual(frame.minY, side + 2, accuracy: 0.001)
     }
 
+    /// 1・3・5 列は決まった段。その先は 25 列まで1列刻み
+    func testStepsAreFixedUpToFiveThenEveryColumn() {
+        XCTAssertEqual(Array(PhotoGridLayout.steps.prefix(3)), [1, 3, 5])
+        XCTAssertEqual(Array(PhotoGridLayout.steps.dropFirst(3)), Array(6...25))
+    }
+
     func testDenseStepsUseOnePointGaps() {
         XCTAssertEqual(PhotoGridLayout.spacing(columns: 5), 2)
         XCTAssertEqual(PhotoGridLayout.spacing(columns: 10), 1)
@@ -58,7 +64,7 @@ final class PhotoGridLayoutTests: XCTestCase {
 
     /// 引いた段で並べると、マスの一辺が求めた大きさになる。**指の下のマスが指と同じ比で変わる**
     func testLevelForSideRoundTrips() {
-        for level in stride(from: 0.0, through: 4.0, by: 0.25) {
+        for level in stride(from: 0.0, through: Double(PhotoGridLayout.maxLevel), by: 0.25) {
             let side = layout.side(level: level)
             let found = layout.level(forSide: side)
             XCTAssertEqual(found.level, level, accuracy: 0.0001)

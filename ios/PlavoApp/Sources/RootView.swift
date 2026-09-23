@@ -42,7 +42,7 @@ struct RootView: View {
                 Label("日記", systemImage: "book").labelStyle(.iconOnly)
             }
             Tab(value: AppTab.talk) {
-                TalkTab()
+                TalkTab(model: model)
             } label: {
                 Label("トーク", systemImage: "bubble.left.and.bubble.right").labelStyle(.iconOnly)
             }

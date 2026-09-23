@@ -138,9 +138,7 @@ struct CapsuleTabBar<Tag: Hashable>: View {
     /// 濃さは画面写真で手本の塊と地の差を測って合わせた。
     /// ライトは地より 18 暗く、ダークは 33 明るい（0〜255）。
     /// **同じ塗りでは両方に合わない。**ダークを明るいほうに合わせると、ライトでは濃すぎる
-    private var blobFill: Color {
-        Color(uiColor: UIColor { $0.userInterfaceStyle == .dark ? .systemFill : .tertiarySystemFill })
-    }
+    private var blobFill: Color { .selectionBlob }
 
     /// 塊の形。**見えるほうにも、文字を切り抜くマスクにも、これを使う。**
     /// 形が1か所から出ているので、色の境目が塊の縁とずれない。
@@ -263,4 +261,18 @@ private struct EdgeInset: ViewModifier, Animatable {
     func body(content: Content) -> some View {
         content.padding(edge, length)
     }
+}
+
+extension Color {
+    /// 選んでいる項目の下に敷く、無彩色の塊（`CapsuleTabBar`・トークの表示の切り替え）。
+    /// ライトは `tertiarySystemFill`、ダークは `systemFill`。
+    ///
+    /// **画面の仕事（MainActor）の外で作る。**ビューの中で `UIColor { ... }` を作ると、
+    /// 中の関数が MainActor のものになる。SwiftUI は画面の切り替えの途中で
+    /// この色を**画面の仕事の外で**読むことがあり、Swift 6 の確かめに掛かってアプリが落ちた
+    /// （トークでおうちを開いたとき）。ここは MainActor ではないので、中の関数も縛られない
+    static let selectionBlob = Color(
+        uiColor: UIColor { @Sendable traits in
+            traits.userInterfaceStyle == .dark ? .systemFill : .tertiarySystemFill
+        })
 }

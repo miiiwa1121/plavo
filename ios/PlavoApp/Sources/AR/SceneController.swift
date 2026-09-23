@@ -88,6 +88,9 @@ final class SceneController: NSObject {
     private(set) var trackingDescription = "—"
     /// 現在の特徴点の数。少ないと奥行きが取れず、追従も不安定になる
     private(set) var featurePointCount = 0
+    /// 診断パネルを開いているか。**開いていないときは数えない。**
+    /// 特徴点を取り出すと点の配列が毎フレーム作られる（数百〜数千点）
+    var wantsDiagnostics = false
     /// 奥行きがレイキャストで取れたか。false なら固定距離のフォールバック（D3-a）
     private(set) var depthFromRaycast = false
     /// 検出を試みた回数と、そのうち植物と判定された回数
@@ -1172,7 +1175,7 @@ extension SceneController: ARSessionDelegate {
 
     /// 診断情報を更新する。吹き出しが出ないときの切り分けに使う
     private func updateDiagnostics(_ frame: ARFrame) {
-        featurePointCount = frame.rawFeaturePoints?.points.count ?? 0
+        if wantsDiagnostics { featurePointCount = frame.rawFeaturePoints?.points.count ?? 0 }
 
         if let light = frame.lightEstimate {
             // ambientIntensity は概ね 0〜2000 ルーメン。1000 が中庸。

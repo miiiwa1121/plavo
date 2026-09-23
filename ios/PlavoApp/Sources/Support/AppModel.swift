@@ -31,7 +31,10 @@ final class AppModel {
     let sensor = SensorClient()
 
     /// 植物・観察・日記。展示では永続化しない（D36）
-    let store = PlantStore()
+    let store: PlantStore
+
+    /// トーク（D59）。おうちごとのグループチャット。株と写真に起きたことが自動で流れる
+    let talk: TalkStore
 
     /// 展示に使う植物のプロファイル。種類が決まったら差し替える（D17-a）
     let profile: PlantProfile = .default
@@ -67,6 +70,10 @@ final class AppModel {
     /// **読み込みは1つずつ失敗させる。**以前は1つの失敗で残りの仕込みも起動引数の登録も
     /// 止まり、株が1つもない状態で始まっていた
     init() {
+        let store = PlantStore()
+        self.store = store
+        talk = TalkStore(plants: store)
+
         var errors: [String] = []
         do {
             bank = try Self.loadBank()
@@ -85,6 +92,12 @@ final class AppModel {
             seed(himari, errors: &errors)
         }
         seed(SeedPlan.kosumo, errors: &errors)
+        // 自分の仮の名前とアイコン（たろう）
+        store.seedUser()
+        // おうちと家族の会話。株の筋書きに合わせるので、株を仕込んだあとに組む（D59）
+        talk.seed()
+        // ここから先に起きたことは、トークに流す（D59-c）
+        store.onEvent = { [weak self] event in self?.talk.handle(event) }
 
         // 起動引数で株を登録できる。
         //   例: -registerPlant そら
@@ -171,8 +184,24 @@ final class AppModel {
         // 育成のグラフの素材として、いま見ている株に積む（D44）
         if let plantId = store.selectedPlantId {
             store.recordMeasurement(value, metric: .soilMoisture, for: plantId)
+            // 水やりと、のどの渇きはトークに流す（D59-c）。見送った株には流さない
+            if store.stage(of: plantId) != .withered {
+                if jumped { talk.noteWatered(plantId) }
+                talk.noteCondition(plantId, thirsty: isThirsty)
+            }
         }
     }
+
+    /// のどが渇いているか。**セリフと同じ帯域で決める**（水不足・危険）。
+    /// 株の様子の帯（トーク）とカメラのセリフが食い違わないようにするため
+    var isThirsty: Bool {
+        guard let key = currentBand()?.key else { return soilMoisture < Self.thirstyLine }
+        return Self.thirstyBands.contains(key)
+    }
+
+    private static let thirstyBands: Set<String> = ["thirsty", "critical"]
+    /// セリフが読めなかったときの線（moisture.json の thirsty の上端）
+    private static let thirstyLine: Double = 20
 
     // MARK: - セリフ
 
@@ -194,6 +223,7 @@ final class AppModel {
     func reset() {
         picker.reset()
         store.reset()
+        talk.seed()
         soilMoisture = Self.initialSoilMoisture
         lastMoisture = Self.initialSoilMoisture
         consecutiveWatering = false

@@ -24,7 +24,9 @@ final class ThumbnailCache {
     ///
     /// 大きい絵を覚える置き場は、枚数を絞って別に作る（`PlantStore.displayImage`）。
     /// 同じ置き場に混ぜると、大きい絵1枚が小さい絵を十数枚追い出す
-    init(countLimit: Int = 300, totalCostLimit: Int = 48 * 1024 * 1024) {
+    /// **写真の数に対して上限が足りないと、開き直しが繰り返される。**
+    /// 仕込みの101枚だけで 47.9MB あり、来場者が数枚撮ると溢れていた
+    init(countLimit: Int = 300, totalCostLimit: Int = 96 * 1024 * 1024) {
         cache.countLimit = countLimit
         cache.totalCostLimit = totalCostLimit
     }

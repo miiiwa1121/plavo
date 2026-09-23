@@ -57,8 +57,10 @@ final class PlantStore {
 
     /// 画面の幅いっぱいに出す1枚（日記のカード・ギャラリーのメイン・全画面・直近の写真）。
     /// 覚えるのは十数枚まで。1枚が 7MB ほどあるので、小さい絵とは置き場を分ける
+    /// **前後2枚ずつ（`prefetchingNeighbors`）と、直前に見ていた数枚が入れば足りる。**
+    /// 1枚 7MB 近いので、余らせるより小さい絵の側へ回す
     @ObservationIgnored private let displayImages = ThumbnailCache(
-        countLimit: 12, totalCostLimit: 96 * 1024 * 1024)
+        countLimit: 8, totalCostLimit: 64 * 1024 * 1024)
 
     /// 画面いっぱいに出す1枚の長辺（ピクセル）。
     ///
@@ -70,12 +72,37 @@ final class PlantStore {
     /// 選択中の株。カメラで観察した結果はここに積まれる
     var selectedPlantId: UUID?
 
+    /// 株と写真に起きたこと。**トークへ自動で流す**（D59-c）。
+    ///
+    /// 流す先（`TalkStore`）はここを知らない。仕込み（`build`）とリセットでは知らせない
+    enum Event {
+        case registered(UUID)
+        case removed(UUID, name: String)
+        /// カメラで撮った（写真・パラパラ・ムービー）。日記の「+」で足した写真は撮影ではない
+        case photographed(UUID, ref: String)
+        /// 写真の実体を手放した。知らせからも外す
+        case photoReleased(String)
+        /// 生育の段階が変わった
+        case stageChanged(UUID, GrowthStage)
+    }
+
+    @ObservationIgnored var onEvent: ((Event) -> Void)?
+
     /// 自分の名前（プロフィール）。アカウントは作らない（D1）ので、端末の中だけに持つ。
-    /// リセットで仮の名前に戻る
+    /// 仮の名前（たろう）から始まり、リセットで戻る（`seedUser`）
     var userName = PlantStore.defaultUserName
-    /// 自分のアイコン。無ければ人のかたちを出す
+    /// 自分のアイコン。仮のアイコンから始まり、リセットで戻る。無ければ人のかたちを出す
     private(set) var userAvatarRef: String?
-    static let defaultUserName = "ゲスト"
+    static let defaultUserName = "たろう"
+
+    /// 自分を、仮の名前とアイコンにする。**起動したときとリセットで呼ぶ。**
+    ///
+    /// プロフィールを、名前もアイコンも入った状態で見せるための仮のデータ。
+    /// アイコンの絵は起動後に描く（`PlaceholderPhotos.userAvatarJPEG`）
+    func seedUser() {
+        userName = Self.defaultUserName
+        userAvatarRef = storeImage(PlaceholderPhotos.userAvatarJPEG(), replacing: userAvatarRef)
+    }
 
     // MARK: - 仕込み
 
@@ -255,6 +282,7 @@ final class PlantStore {
         plants.append(plant)
         observations[plant.id] = []
         selectedPlantId = plant.id
+        onEvent?(.registered(plant.id))
         return plant
     }
 
@@ -335,6 +363,7 @@ final class PlantStore {
 
     func remove(_ plantId: UUID) {
         guard canRemove(plantId) else { return }
+        let name = plant(plantId)?.name
         if let avatar = plant(plantId)?.avatarRef { images[avatar] = nil }
         plants.removeAll { $0.id == plantId }
         observations[plantId] = nil
@@ -352,12 +381,15 @@ final class PlantStore {
         }
         diary.removeAll { $0.plantId == plantId }
         if selectedPlantId == plantId { selectedPlantId = nil }
+        if let name { onEvent?(.removed(plantId, name: name)) }
     }
 
     // MARK: - 記録
 
     func record(_ observation: PlantObservation, for plantId: UUID) {
+        let before = stage(of: plantId)
         observations[plantId, default: []].append(observation)
+        if let after = stage(of: plantId), after != before { onEvent?(.stageChanged(plantId, after)) }
     }
 
     /// 届いた計測値を積む。10分ごとの平均にまとめる（D44）
@@ -468,8 +500,9 @@ final class PlantStore {
         guard let i = diary.firstIndex(where: { $0.id == id }) else { return false }
         guard diary[i].canAddPhoto else { return false }
         if fromCamera, let plantId, !diary[i].canShoot(plantId) { return false }
-        diary[i].photos.append(
-            DiaryPhoto(ref: storeImage(data), plantId: plantId, fromCamera: fromCamera))
+        let ref = storeImage(data)
+        diary[i].photos.append(DiaryPhoto(ref: ref, plantId: plantId, fromCamera: fromCamera))
+        if fromCamera, let plantId { onEvent?(.photographed(plantId, ref: ref)) }
         return true
     }
 
@@ -479,8 +512,9 @@ final class PlantStore {
     func addFlipbookPhoto(_ data: Data, to id: UUID, of plantId: UUID) -> Bool {
         guard let i = diary.firstIndex(where: { $0.id == id }), diary[i].canShootFlipbook(plantId)
         else { return false }
-        diary[i].photos.append(
-            DiaryPhoto(ref: storeImage(data), plantId: plantId, fromCamera: true, flipbook: true))
+        let ref = storeImage(data)
+        diary[i].photos.append(DiaryPhoto(ref: ref, plantId: plantId, fromCamera: true, flipbook: true))
+        onEvent?(.photographed(plantId, ref: ref))
         return true
     }
 
@@ -492,6 +526,7 @@ final class PlantStore {
         let ref = storeImage(poster)
         movies[ref] = url
         diary[i].photos.append(DiaryPhoto(ref: ref, plantId: plantId, fromCamera: true, movie: true))
+        onEvent?(.photographed(plantId, ref: ref))
         return true
     }
 
@@ -560,6 +595,7 @@ final class PlantStore {
     private func releasePhoto(_ ref: String) {
         images[ref] = nil
         if let url = movies.removeValue(forKey: ref) { try? FileManager.default.removeItem(at: url) }
+        onEvent?(.photoReleased(ref))
     }
 
     /// グリッドや列に出す小さい絵。
@@ -583,8 +619,12 @@ final class PlantStore {
     ///
     /// 2本指で列を変えている最中に、初めて見えたマスをその場で開くと引っかかる。
     /// 先に裏で開いておき、描くときには覚えているものを出すだけにする
-    func thumbnailInBackground(_ ref: String, maxPixel: CGFloat = 400) async -> UIImage? {
-        await loadInBackground(ref, maxPixel: maxPixel, into: thumbnails)
+    /// - Parameter priority: 先回りの下ごしらえ（一覧の先読み）は `.utility`。
+    ///   **高い優先度で回すと、高性能コアを長く使って端末が温まる**
+    func thumbnailInBackground(
+        _ ref: String, maxPixel: CGFloat = 400, priority: TaskPriority = .userInitiated
+    ) async -> UIImage? {
+        await loadInBackground(ref, maxPixel: maxPixel, into: thumbnails, priority: priority)
     }
 
     /// 画面いっぱいに出す1枚を、**裏で**開いて覚える（`prefetchingNeighbors`）。
@@ -594,10 +634,13 @@ final class PlantStore {
     }
 
     /// 縮めて開くのは裏で、覚えるのは画面の仕事の中で
-    private func loadInBackground(_ ref: String, maxPixel: CGFloat, into cache: ThumbnailCache) async -> UIImage? {
+    private func loadInBackground(
+        _ ref: String, maxPixel: CGFloat, into cache: ThumbnailCache,
+        priority: TaskPriority = .userInitiated
+    ) async -> UIImage? {
         if let hit = cache.cached(ref, maxPixel: maxPixel) { return hit }
         guard let data = images[ref] else { return nil }
-        let made = await Task.detached(priority: .userInitiated) {
+        let made = await Task.detached(priority: priority) {
             ThumbnailCache.downsample(data, maxPixel: maxPixel)
         }.value
         if let made { cache.remember(made, for: ref, maxPixel: maxPixel) }
@@ -775,8 +818,7 @@ final class PlantStore {
         // 未選択に戻す。次の来場者も「はじめまして」から始まる
         selectedPlantId = nil
         // 名前とアイコンも来場者のもの。仮に戻す
-        userName = Self.defaultUserName
-        userAvatarRef = nil
+        seedUser()
         // 仕込みの株は組み直す。筋書きは持ったままなので読み込みは要らない
         for entry in seedPlans { build(entry.plan, growth: entry.growth) }
     }
@@ -793,6 +835,8 @@ struct PlantPhoto: Hashable {
     var plantId: UUID?
     /// ムービーか（D58）。一覧で印を付け、プロフィールの「写真」「動画」で分ける
     var movie = false
+    /// パラパラの写真か。ギャラリーの「写真」では外す
+    var flipbook = false
 }
 
 extension PlantPhoto {
@@ -800,6 +844,6 @@ extension PlantPhoto {
     init(_ photo: DiaryPhoto, in entry: DiaryEntry) {
         self.init(
             ref: photo.ref, date: entry.date, dayLabel: entry.dayLabel, plantId: photo.plantId,
-            movie: photo.movie)
+            movie: photo.movie, flipbook: photo.flipbook)
     }
 }

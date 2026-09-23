@@ -111,6 +111,7 @@ struct GalleryStripView: View {
         .task(id: photos.map(\.ref)) {
             for photo in photos {
                 if Task.isCancelled { return }
+                // **ここは急ぐ。**開いた直後になぞられるので、間に合わないと1枚ずつ開くことになる
                 _ = await model.store.thumbnailInBackground(photo.ref, maxPixel: StripThumbnail.maxPixel)
             }
         }
