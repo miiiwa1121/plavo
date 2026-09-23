@@ -22,9 +22,11 @@ import UIKit
 /// | `snap` | 決まった | シャッター、選択の確定 |
 /// | `thud` | 重い | 削除・リセット |
 /// | `caution` | 進めない | 上限、繋がらない |
+/// | `wrong` | 違う（ブー） | 植物を選ばずにシャッターを押した |
 ///
-/// **`error`（失敗の三連）は使わない。**このアプリに「ユーザーの失敗」は無い
-/// （原則3 / D24）。見つからないのも、上限に届いたのも、来場者のせいではない。
+/// **`error`（失敗の三連）は、植物を選ばずにシャッターを押したときに限る**（`wrong`）。
+/// それ以外では使わない。見つからないのも、上限に届いたのも、来場者のせいではない
+/// （原則3 / D24）。
 ///
 /// **`success`（成功の三連）も使わない。**嬉しいことが起きるのは植物の側なので、
 /// そこで返すのは植物の触覚になる。
@@ -49,6 +51,15 @@ enum Haptics {
     /// 進めない
     static func caution() {
         notification.notificationOccurred(.warning)
+        notification.prepare()
+    }
+
+    /// 違う（ブー）。**植物を選ばずにシャッターを押したときだけ使う。**
+    ///
+    /// 未設定のシャッターは見た目で塞がず、押させてから返す。
+    /// 押せないことを、押した手に伝える
+    static func wrong() {
+        notification.notificationOccurred(.error)
         notification.prepare()
     }
 
@@ -86,12 +97,9 @@ enum Haptics {
     }
 
     static func plant(_ note: Note) {
-        guard plantEngine.play(note) else {
-            // **無音にはしない。**Core Haptics が使えない端末でも、
-            // 何かが起きたことだけは返す（§6.3）
-            note.fallback()
-            return
-        }
+        // **無音にはしない。**Core Haptics が使えない端末でも、
+        // 何かが起きたことだけは返す（§6.3）
+        if !plantEngine.play(note) { note.fallback() }
     }
 
     private static let plantEngine = PlantHapticEngine()

@@ -20,6 +20,26 @@ import { DEFAULT_PROFILE, type PlantProfile } from "./profile.js";
  */
 const LUX_TO_PPFD = 1 / 54;
 
+/** 1日のミリ秒 */
+export const MS_PER_DAY = 86_400_000;
+
+/**
+ * 最小と最大。
+ *
+ * **`Math.max(...values)` を使わない。**引数に展開するので、1秒ごとの計測を1日分
+ * （86,400点）渡したあたりで呼び出しの上限に近づき、超えると例外で落ちる。
+ */
+export function extent(values: readonly number[]): { min: number; max: number } | null {
+  if (values.length === 0) return null;
+  let min = Infinity;
+  let max = -Infinity;
+  for (const v of values) {
+    if (v < min) min = v;
+    if (v > max) max = v;
+  }
+  return { min, max };
+}
+
 // --- 積算光量 (DLI) -------------------------------------------------------
 
 /**
@@ -54,11 +74,9 @@ export function dailyGdd(
   readings: SensorReading[],
   profile: PlantProfile = DEFAULT_PROFILE,
 ): number {
-  if (readings.length === 0 || profile.baseTempC === null) return 0;
-  const temps = readings.map((r) => r.temperature);
-  const tmax = Math.max(...temps);
-  const tmin = Math.min(...temps);
-  return Math.max(0, (tmax + tmin) / 2 - profile.baseTempC);
+  const temps = extent(readings.map((r) => r.temperature));
+  if (temps === null || profile.baseTempC === null) return 0;
+  return Math.max(0, (temps.max + temps.min) / 2 - profile.baseTempC);
 }
 
 /** 育成開始からの積算温度 */
@@ -123,6 +141,9 @@ export function detectWateringEvents(readings: SensorReading[]): string[] {
   return events;
 }
 
+/** 乾き方を測る区間の始まり（列の長さに対する割合）。直近4分の1を使う */
+const DRYING_WINDOW_START = 0.75;
+
 /**
  * 次に水やりが必要になるまでの日数。
  * 直近の減衰率から、下限に到達する時点を線形外挿する。
@@ -136,10 +157,9 @@ export function daysToNextWatering(
   if (last.soilMoisture <= profile.soilMoistureFloor) return 0;
 
   // 直近4分の1区間の減衰率を使う。水やり直後の跳ね上がりを避けるため区間を限定する。
-  const from = readings[Math.floor(readings.length * 0.75)]!;
+  const from = readings[Math.floor(readings.length * DRYING_WINDOW_START)]!;
   const dtDays =
-    (new Date(last.measuredAt).getTime() - new Date(from.measuredAt).getTime()) /
-    86_400_000;
+    (new Date(last.measuredAt).getTime() - new Date(from.measuredAt).getTime()) / MS_PER_DAY;
   if (dtDays <= 0) return null;
 
   const dropPerDay = (from.soilMoisture - last.soilMoisture) / dtDays;

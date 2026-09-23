@@ -64,9 +64,9 @@ public enum MetricAggregation {
     /// データより長い幅は全体と同じ表示にするため、登録して30分の株で
     /// 「1ヶ月」を押しても、1日平均で1点に潰れないようにする。
     public static func bucket(forVisibleLength length: TimeInterval) -> TimeInterval? {
-        if length <= 86_400 { return nil }
-        if length <= 7 * 86_400 { return 3_600 }
-        return 86_400
+        if length <= TimeSpan.day { return nil }
+        if length <= TimeSpan.week { return TimeSpan.hour }
+        return TimeSpan.day
     }
 
     /// 列をグラフの点にする。まとめるときは平均と、その間の最小・最大を持つ
@@ -145,13 +145,13 @@ public enum MetricDerivation {
     public static func dayLength(from light: MetricSeries?, calendar: Calendar = .current) -> MetricSeries? {
         guard let light, !light.values.isEmpty else { return nil }
         let dayStart = calendar.startOfDay(for: light.start)
-        let pointsPerDay = 86_400 / light.interval
+        let pointsPerDay = TimeSpan.day / light.interval
 
         var lit: [Int: Int] = [:]
         var measured: [Int: Int] = [:]
         for (i, value) in light.values.enumerated() {
             guard let value else { continue }
-            let day = Int((light.date(at: i).timeIntervalSince(dayStart) / 86_400).rounded(.down))
+            let day = Int((light.date(at: i).timeIntervalSince(dayStart) / TimeSpan.day).rounded(.down))
             measured[day, default: 0] += 1
             if value >= dayLengthThresholdLux { lit[day, default: 0] += 1 }
         }
@@ -161,10 +161,10 @@ public enum MetricDerivation {
             guard let count = measured[day], Double(count) >= pointsPerDay * minimumCoverage else {
                 return nil
             }
-            return Double(lit[day] ?? 0) * light.interval / 3_600
+            return Double(lit[day] ?? 0) * light.interval / TimeSpan.hour
         }
         guard values.contains(where: { $0 != nil }) else { return nil }
-        return MetricSeries(start: dayStart, interval: 86_400, values: values)
+        return MetricSeries(start: dayStart, interval: TimeSpan.day, values: values)
     }
 }
 

@@ -15,6 +15,20 @@ import { DiagnosisSchema, type Diagnosis } from "./schema.js";
 
 export const MODEL = "claude-opus-5";
 
+/** 20秒を超えたら事前定義セリフへフォールバックする（D28） */
+const DEFAULT_TIMEOUT_MS = 20_000;
+
+/**
+ * API の呼び出し口。**1つを使い回す。**呼ぶたびに作ると、接続の使い回しが効かない。
+ * 最初に呼ばれたときに作るのは、`--dry-run` のように API を呼ばない使い方で
+ * 認証情報を要求しないため
+ */
+let sharedClient: Anthropic | undefined;
+function client(): Anthropic {
+  sharedClient ??= new Anthropic();
+  return sharedClient;
+}
+
 export type DiagnoseOptions = {
   /** 品質とレイテンシと費用の折衷。実測して調整する（P-1） */
   effort?: "low" | "medium" | "high";
@@ -42,11 +56,10 @@ export async function diagnose(
   mediaType: "image/jpeg" | "image/png",
   options: DiagnoseOptions = {},
 ): Promise<DiagnoseResult> {
-  const client = new Anthropic();
   const profile = options.profile ?? DEFAULT_PROFILE;
   const started = Date.now();
 
-  const response = await client.messages.parse(
+  const response = await client().messages.parse(
     {
       model: MODEL,
       max_tokens: 8000,
@@ -77,7 +90,7 @@ export async function diagnose(
         format: zodOutputFormat(DiagnosisSchema),
       },
     },
-    { timeout: options.timeoutMs ?? 20_000 },
+    { timeout: options.timeoutMs ?? DEFAULT_TIMEOUT_MS },
   );
 
   // 想定外のレスポンスはすべてフォールバック対象にする（D28）。
@@ -103,11 +116,22 @@ export async function diagnose(
   };
 }
 
-/** 1回あたりの費用を概算する。claude-opus-5 は $5/MTok in, $25/MTok out */
+/**
+ * MODEL の料金（100万トークンあたりのドル）。**モデルを変えたらここも直す。**
+ * キャッシュは入力の料金に倍率を掛ける（書き込みは5分の保持で 1.25 倍、読み出しは 0.1 倍）
+ */
+const PRICE_USD_PER_MTOK = { input: 5, output: 25 } as const;
+const CACHE_WRITE_MULTIPLIER = 1.25;
+const CACHE_READ_MULTIPLIER = 0.1;
+
+/** 1回あたりの費用を概算する */
 export function estimateCostUsd(usage: DiagnoseResult["usage"]): number {
-  const inputUsd = (usage.inputTokens / 1_000_000) * 5;
-  const cacheWriteUsd = (usage.cacheCreationTokens / 1_000_000) * 5 * 1.25;
-  const cacheReadUsd = (usage.cacheReadTokens / 1_000_000) * 5 * 0.1;
-  const outputUsd = (usage.outputTokens / 1_000_000) * 25;
-  return inputUsd + cacheWriteUsd + cacheReadUsd + outputUsd;
+  const perToken = (usdPerMTok: number) => usdPerMTok / 1_000_000;
+  const input = perToken(PRICE_USD_PER_MTOK.input);
+  return (
+    usage.inputTokens * input +
+    usage.cacheCreationTokens * input * CACHE_WRITE_MULTIPLIER +
+    usage.cacheReadTokens * input * CACHE_READ_MULTIPLIER +
+    usage.outputTokens * perToken(PRICE_USD_PER_MTOK.output)
+  );
 }

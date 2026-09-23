@@ -87,8 +87,8 @@ struct GrowthSection: View {
     private static func domain(of series: [MetricSeries]) -> ClosedRange<Date> {
         let start = series.map(\.start).min() ?? Date()
         let end = series.compactMap(\.end).max() ?? start
-        // 1点しかないと幅が0になり、グラフが描けない
-        return start...max(end, start.addingTimeInterval(600))
+        // 1点しかないと幅が0になり、グラフが描けない。1刻みぶんは空ける
+        return start...max(end, start.addingTimeInterval(MetricCatalog.sensorInterval))
     }
 
     /// 縦軸の範囲。**全期間の値から決め、送っても変えない。**
@@ -150,11 +150,11 @@ enum GrowthRange: CaseIterable, Hashable {
         let length: TimeInterval? =
             switch self {
             case .all: nil
-            case .year: 365 * 86_400
-            case .month: 30 * 86_400
-            case .week: 7 * 86_400
-            case .day: 86_400
-            case .hour: 3_600
+            case .year: 365 * TimeSpan.day
+            case .month: 30 * TimeSpan.day
+            case .week: TimeSpan.week
+            case .day: TimeSpan.day
+            case .hour: TimeSpan.hour
             }
         return min(length ?? dataSpan, dataSpan)
     }
@@ -234,7 +234,7 @@ private struct MetricCard: View {
     /// 1日以内は「14:00」、それより長ければ日記と同じ「8/31」
     private func axisLabel(_ date: Date) -> String {
         let c = Calendar.current.dateComponents([.month, .day, .hour, .minute], from: date)
-        if visibleLength <= 86_400 {
+        if visibleLength <= TimeSpan.day {
             return String(format: "%d:%02d", c.hour ?? 0, c.minute ?? 0)
         }
         return "\(c.month ?? 0)/\(c.day ?? 0)"
@@ -247,11 +247,13 @@ private struct MetricCard: View {
     /// 目盛りの位置。**見えている期間の分だけ作る。**
     /// 自動に任せると全期間ぶんの目盛りが作られ、描くのが遅くなる
     private var axisDates: [Date] {
+        let minute = TimeSpan.minute, hour = TimeSpan.hour, day = TimeSpan.day
         let steps: [TimeInterval] = [
-            900, 1_800, 3_600, 3 * 3_600, 6 * 3_600, 12 * 3_600,
-            86_400, 2 * 86_400, 7 * 86_400, 14 * 86_400, 30 * 86_400,
+            15 * minute, 30 * minute, hour, 3 * hour, 6 * hour, 12 * hour,
+            day, 2 * day, 7 * day, 14 * day, 30 * day,
         ]
-        let step = steps.first { $0 >= visibleLength / 4 } ?? 30 * 86_400
+        // 目盛りは4本くらい
+        let step = steps.first { $0 >= visibleLength / 4 } ?? 30 * day
         var date = Calendar.current.startOfDay(for: window.lowerBound)
         var dates: [Date] = []
         while date <= window.upperBound {

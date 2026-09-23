@@ -117,8 +117,10 @@ struct CapsuleTabBar<Tag: Hashable>: View {
         if measure {
             let isSelected = item.tag == selection
             text
-                .onGeometryChange(for: ClosedRange<CGFloat>.self) {
-                    let frame = $0.frame(in: .named(space))
+                // 座標の名前だけを持ち込む。self ごとつかむと、別のスレッドから呼ばれうる処理に
+                // 型の引数（Tag）が入り込む
+                .onGeometryChange(for: ClosedRange<CGFloat>.self) { [space] proxy in
+                    let frame = proxy.frame(in: .named(space))
                     return frame.minX...frame.maxX
                 } action: { spans[item.tag] = $0 }
                 .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)

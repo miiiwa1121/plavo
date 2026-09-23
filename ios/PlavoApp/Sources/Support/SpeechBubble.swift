@@ -33,10 +33,10 @@ struct SpeechBubble: View {
 
     var body: some View {
         Text(text)
-            .font(.system(size: 22, weight: .semibold, design: .rounded))
+            .font(.system(size: BubbleMetrics.fontSize, weight: .semibold, design: .rounded))
             .foregroundStyle(Color(white: 0.11))
             .multilineTextAlignment(.center)
-            .lineSpacing(3)
+            .lineSpacing(BubbleMetrics.lineSpacing)
             .frame(width: BubbleMetrics.textWidth(for: text))
             .padding(.horizontal, BubbleMetrics.padding.width)
             .padding(.vertical, BubbleMetrics.padding.height)
@@ -307,6 +307,10 @@ enum BubbleMetrics {
     static let tipLean: CGFloat = 38
     /// 文字の折り返し幅の上限
     static let maxTextWidth: CGFloat = 250
+    /// 文字の大きさと行間。**描く側（`SpeechBubble`）と測る側（`layoutSize`）で同じ値を使う。**
+    /// 片方だけ変えると、測った大きさと描いた大きさがずれて置き場所が狂う
+    static let fontSize: CGFloat = 22
+    static let lineSpacing: CGFloat = 3
 
     /// 文字の実寸から本体の幅を決める。
     ///
@@ -334,7 +338,7 @@ enum BubbleMetrics {
     static func layoutSize(for text: String) -> CGSize {
         let width = textWidth(for: text)
         let style = NSMutableParagraphStyle()
-        style.lineSpacing = 3
+        style.lineSpacing = lineSpacing
         style.alignment = .center
         let bounds = (text as NSString).boundingRect(
             with: CGSize(width: width, height: .greatestFiniteMagnitude),
@@ -353,9 +357,9 @@ enum BubbleMetrics {
     static let singleLineHeight: CGFloat = layoutSize(for: "あ").height
 
     private static let measuringFont: UIFont = {
-        let base = UIFont.systemFont(ofSize: 22, weight: .semibold)
+        let base = UIFont.systemFont(ofSize: fontSize, weight: .semibold)
         guard let descriptor = base.fontDescriptor.withDesign(.rounded) else { return base }
-        return UIFont(descriptor: descriptor, size: 22)
+        return UIFont(descriptor: descriptor, size: fontSize)
     }()
 }
 

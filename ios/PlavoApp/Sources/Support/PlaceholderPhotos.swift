@@ -8,7 +8,8 @@ import UIKit
 /// ギャラリーと日記を、写真が並んだ状態で確かめられるようにするために置く。
 /// 画像ファイルは同梱せず、起動時に鉢植えを描く。育ちの段階に合わせて描き分けるので、
 /// 列をなぞったときに「育っていく」流れが見える。
-/// 本物と取り違えないよう、左上に「仮」と入れる。
+///
+/// **写真の中に文字は入れない。**以前は左上に「仮 N日目」の札を描いていた
 @MainActor
 enum PlaceholderPhotos {
 
@@ -93,10 +94,30 @@ enum PlaceholderPhotos {
     ///   - thirsty: 水切れの日。葉を垂らす
     ///   - shot: その日の何枚目か。構図と縦横比を変える
     static func jpeg(day: Int, stage: GrowthStage, thirsty: Bool, shot: Int, look: Look) -> Data {
-        let key = "\(look.id)-\(day)-\(shot)-\(stage.rawValue)-\(thirsty)"
-        if let cached = cache[key] { return cached }
+        render(
+            key: "\(look.id)-\(day)-\(shot)-\(stage.rawValue)-\(thirsty)",
+            size: size(day: day, shot: shot),
+            day: day, stage: stage, thirsty: thirsty, shot: shot, look: look)
+    }
 
-        let size = size(day: day, shot: shot)
+    /// パラパラの1枚。**毎日同じ角度・同じ大きさで撮った体にする。**
+    /// 縦横比も構図も日で変えない。変えると、めくったときに鉢が跳ねて、育ちが見えなくなる
+    static func flipbookJPEG(day: Int, stage: GrowthStage, thirsty: Bool, look: Look) -> Data {
+        render(
+            key: "flip-\(look.id)-\(day)-\(stage.rawValue)-\(thirsty)",
+            size: flipbookSize,
+            day: day, stage: stage, thirsty: thirsty, shot: 0, look: look)
+    }
+
+    /// パラパラの大きさ。日ごとに描くので枚数が多い。**小さめに描いて、起動を重くしない**
+    private static let flipbookSize = CGSize(width: 600, height: 800)
+    private static let jpegQuality: CGFloat = 0.8
+
+    /// 描いて JPEG にする。同じ鍵なら描き直さない
+    private static func render(
+        key: String, size: CGSize, day: Int, stage: GrowthStage, thirsty: Bool, shot: Int, look: Look
+    ) -> Data {
+        if let cached = cache[key] { return cached }
         let format = UIGraphicsImageRendererFormat()
         format.scale = 1
         let image = UIGraphicsImageRenderer(size: size, format: format).image { context in
@@ -104,27 +125,7 @@ enum PlaceholderPhotos {
                 context.cgContext, size: size, day: day, stage: stage,
                 thirsty: thirsty, shot: shot, look: look)
         }
-        let data = image.jpegData(compressionQuality: 0.8) ?? Data()
-        cache[key] = data
-        return data
-    }
-
-    /// パラパラの1枚。**毎日同じ角度・同じ大きさで撮った体にする。**
-    /// 縦横比も構図も日で変えない。変えると、めくったときに鉢が跳ねて、育ちが見えなくなる
-    static func flipbookJPEG(day: Int, stage: GrowthStage, thirsty: Bool, look: Look) -> Data {
-        let key = "flip-\(look.id)-\(day)-\(stage.rawValue)-\(thirsty)"
-        if let cached = cache[key] { return cached }
-
-        // 日ごとに描くので枚数が多い。**小さめに描いて、起動を重くしない**
-        let size = CGSize(width: 600, height: 800)
-        let format = UIGraphicsImageRendererFormat()
-        format.scale = 1
-        let image = UIGraphicsImageRenderer(size: size, format: format).image { context in
-            draw(
-                context.cgContext, size: size, day: day, stage: stage,
-                thirsty: thirsty, shot: 0, look: look)
-        }
-        let data = image.jpegData(compressionQuality: 0.8) ?? Data()
+        let data = image.jpegData(compressionQuality: jpegQuality) ?? Data()
         cache[key] = data
         return data
     }
@@ -192,7 +193,6 @@ enum PlaceholderPhotos {
                 ceiling: square.minY + u * 0.14, day: day, stage: stage,
                 thirsty: thirsty, look: look)
         }
-        drawBadge(day: day, u: u, origin: CGPoint(x: square.minX + u * 0.04, y: square.minY + u * 0.04))
     }
 
     private static func drawPlant(
@@ -303,21 +303,6 @@ enum PlaceholderPhotos {
         }
         c.setFillColor(center)
         c.fillEllipse(in: CGRect(x: p.x - r * 0.45, y: p.y - r * 0.45, width: r * 0.9, height: r * 0.9))
-    }
-
-    /// 「仮」の札。本物の写真と取り違えないため
-    private static func drawBadge(day: Int, u: CGFloat, origin: CGPoint) {
-        let text = "仮  \(day)日目" as NSString
-        let attributes: [NSAttributedString.Key: Any] = [
-            .font: UIFont.systemFont(ofSize: u * 0.045, weight: .bold),
-            .foregroundColor: UIColor.white,
-        ]
-        let textSize = text.size(withAttributes: attributes)
-        let pad = u * 0.02
-        let rect = CGRect(x: origin.x, y: origin.y, width: textSize.width + pad * 2, height: textSize.height + pad)
-        UIColor.black.withAlphaComponent(0.4).setFill()
-        UIBezierPath(roundedRect: rect, cornerRadius: rect.height / 2).fill()
-        text.draw(at: CGPoint(x: rect.minX + pad, y: rect.minY + pad / 2), withAttributes: attributes)
     }
 
     private static func rgb(_ r: CGFloat, _ g: CGFloat, _ b: CGFloat, _ a: CGFloat = 1) -> CGColor {

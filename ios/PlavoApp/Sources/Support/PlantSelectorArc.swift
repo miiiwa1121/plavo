@@ -60,7 +60,9 @@ struct PlantSelectorArc: View {
 
     /// 縦の置き場所。画面中央からのずれ。持ち方に合わせて動かせる
     /// 未設定なら 0。`object(forKey:) as? Double` は型が合わず取りこぼす
-    @State private var barOffset: CGFloat = UserDefaults.standard.double(forKey: "arcOffset")
+    @State private var barOffset: CGFloat = UserDefaults.standard.double(forKey: Self.offsetKey)
+    /// 縦の置き場所を覚えておく鍵
+    private static let offsetKey = "arcOffset"
     @State private var dragBaseOffset: CGFloat = 0
     @State private var pressTask: Task<Void, Never>?
     @State private var mode: Mode = .idle
@@ -622,7 +624,7 @@ struct PlantSelectorArc: View {
                 pressTask = nil
                 ticker = nil
                 if mode == .moving {
-                    UserDefaults.standard.set(Double(barOffset), forKey: "arcOffset")
+                    UserDefaults.standard.set(Double(barOffset), forKey: Self.offsetKey)
                 } else if mode == .selecting {
                     commit()
                 } else if expanded {

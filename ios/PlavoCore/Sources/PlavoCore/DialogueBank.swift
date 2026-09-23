@@ -40,6 +40,22 @@ public struct DialogueBank: Sendable {
         let panels: [Panel]
     }
 
+    /// ファイルの中身が仕様と合わない。
+    ///
+    /// **手で書くファイルなので、どこが悪いかを言う。**範囲の上下を取り違えたまま
+    /// `ClosedRange` を作ると、読み込んだ瞬間にアプリが落ちる
+    public enum LoadError: Error, Equatable, CustomStringConvertible {
+        /// 範囲は [下限, 上限] の2つで、下限が上限を超えないこと
+        case invalidRange(bandKey: String, range: [Double])
+
+        public var description: String {
+            switch self {
+            case .invalidRange(let key, let range):
+                "帯域 \(key) の range が不正です: \(range)（[下限, 上限] の2つで、下限 ≦ 上限）"
+            }
+        }
+    }
+
     // MARK: - 保持するもの
 
     public struct Band: Sendable {
@@ -77,14 +93,7 @@ public struct DialogueBank: Sendable {
 
         func bands(_ data: Data) throws -> [Band] {
             try decoder.decode(BandFile.self, from: data).bands.map {
-                Band(
-                    key: $0.key,
-                    label: $0.label,
-                    range: $0.range.flatMap { r in
-                        r.count == 2 ? r[0]...r[1] : nil
-                    },
-                    lines: $0.lines
-                )
+                Band(key: $0.key, label: $0.label, range: try Self.range(of: $0), lines: $0.lines)
             }
         }
 
@@ -96,6 +105,15 @@ public struct DialogueBank: Sendable {
         timeline = try decoder.decode(PanelFile.self, from: timelineData).panels.map {
             Panel(key: $0.key, label: $0.label, dayLabel: $0.dayLabel, lines: $0.lines)
         }
+    }
+
+    /// 帯域の範囲。範囲を持たない帯域（日照・環境・成長）は nil
+    private static func range(of band: BandFile.Band) throws -> ClosedRange<Double>? {
+        guard let r = band.range else { return nil }
+        guard r.count == 2, r[0] <= r[1] else {
+            throw LoadError.invalidRange(bandKey: band.key, range: r)
+        }
+        return r[0]...r[1]
     }
 
     /// content/dialogues/ のディレクトリから読み込む

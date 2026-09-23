@@ -91,8 +91,10 @@
 ```
 POST /sensor
   Content-Type: application/json
-  Body: 上記のペイロード
+  Body: 上記のペイロード（16KB まで）
   Response: 204 No Content
+            400 JSON として読めない／ペイロードが仕様と合わない（どの項目が悪いかを返す）
+            413 本文が 16KB を超えた
 ```
 
 ```
@@ -102,10 +104,15 @@ GET /sensor/latest?gadgetId=gadget-001
 
 ```
 GET /sensor/recent?gadgetId=gadget-001&seconds=300
-  Response: 直近N秒分の配列
+  Response: 直近N秒分の配列（seconds を省くと300秒）
+            400 gadgetId が無い／seconds が正の数でない
 ```
 
 アプリは `GET` でポーリングする。
+
+**本文の大きさに上限を置いている。**1点のペイロードは 300 バイトほどなので、16KB で足りる。上限が無いと、同じネットワークにいる誰かが巨大な本文を送るだけで PC のメモリを食い尽くせる。
+
+**1件の失敗で中継を止めない。**壊れたリクエストや途中で切れた送信があっても、そのリクエストに 4xx / 5xx を返すだけで、サーバーは動き続ける（2026-09-22 まで、壊れた URL のリクエスト1つでプロセスごと落ちていた）。
 
 ## 6. 展示で必要な最小構成
 

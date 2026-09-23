@@ -9,18 +9,25 @@ enum ShutterMode: String, CaseIterable, Identifiable {
     /// パラパラカメラ。前回のパラパラの1枚を薄く重ね、同じ角度で撮る。1日・1株につき1枚。
     ///
     /// **「撮る」の左に置く。**「撮る」から右へ「迎える」という、これまでの滑らせ方を変えないため
+    /// （あとから「撮る」と「迎える」の間にムービーが入った・D58）
     case flipbook
     /// いつもの撮影。今日の日記に写真が入る
     case capture
+    /// ムービーカメラ。3秒のショートムービーを撮る（D58）。**「撮る」の右に置く**
+    case movie
     /// 植物を迎える。撮った1枚で確かめてから登録する
     case addPlant
 
     var id: String { rawValue }
 
+    /// ムービーカメラで撮る長さ（D58）。撮っている間の輪も、この時間で1周する
+    static let movieDuration: TimeInterval = 3
+
     var label: String {
         switch self {
         case .flipbook: "パラパラ"
         case .capture: "撮る"
+        case .movie: "ムービー"
         case .addPlant: "迎える"
         }
     }
@@ -31,6 +38,7 @@ enum ShutterMode: String, CaseIterable, Identifiable {
         // 2枚が重なった形。前回の1枚に重ねて撮ることを表す
         case .flipbook: "square.on.square"
         case .capture: nil
+        case .movie: "video.fill"
         case .addPlant: "plus"
         }
     }
@@ -45,12 +53,10 @@ struct ShutterBar: View {
     let onFire: () -> Void
     /// 撮影中など、いまは押しても始められない
     var disabled = false
-    /// **いまは使えない種類。**斜線を入れて、押せないことを形で示す。
-    ///
-    /// 薄くするだけでは「暗いところに居る」との区別が付かない
-    var blocked: Set<ShutterMode> = []
 
-    private let bigSize: CGFloat = 72
+    /// 選ばれているシャッターの大きさ。**横に並べる部品（直近の1枚）が高さを合わせる**
+    static let bigSize: CGFloat = 72
+    private let bigSize = ShutterBar.bigSize
     private let smallSize: CGFloat = 42
     /// 記号の大きさ。**選択によらず変えない。**
     /// ボタンの大きさに比例させると、切り替えのたびに字が組み直されて揺れる
@@ -95,7 +101,6 @@ struct ShutterBar: View {
     private func button(_ m: ShutterMode) -> some View {
         let selected = m == mode
         let size = selected ? bigSize : smallSize
-        let unavailable = blocked.contains(m)
         return Button {
             if selected {
                 // 押した手応えと撮れた手応えは、撮る側（CameraTab）が返す。
@@ -117,24 +122,12 @@ struct ShutterBar: View {
                         .font(.system(size: symbolSize, weight: .bold))
                         .blendMode(.destinationOut)
                 }
-                if unavailable {
-                    // 斜線もくり抜く。記号と同じ描きかたに揃える。
-                    // **図形で描く。**文字だと選択の切り替えごとに組み直されて揺れる。
-                    //
-                    // **ボタンの端から端まで引く。**中に収めると「記号が入っている」に
-                    // 見えて、押せないことが伝わらない。縁の輪も断ち切る
-                    Capsule()
-                        .fill(.white)
-                        .frame(width: size, height: selected ? 5 : 3.5)
-                        .rotationEffect(.degrees(-45))
-                        .blendMode(.destinationOut)
-                }
             }
             // くり抜きを効かせるために、この重なりを一度まとめて描く
             .compositingGroup()
             .frame(width: size, height: size)
         }
-        .disabled(unavailable || (disabled && selected))
+        .disabled(disabled && selected)
         .opacity(disabled && selected ? 0.5 : 1)
     }
 

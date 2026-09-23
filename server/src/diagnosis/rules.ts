@@ -71,72 +71,47 @@ const CALLING_ATTENTION: { re: RegExp; label: string }[] = [
   { re: /確認して/, label: "確認して" },
 ];
 
-const MAX_CHARS = 40;
+/** セリフの字数の上限。吹き出しに収まる長さ */
+export const MAX_DIALOGUE_CHARS = 40;
+
+/** 最初に含まれていた語。**1つの規則につき1件だけ報告する**（同じ規則で何件も並べない） */
+const firstIncluded = (text: string, words: readonly string[]): string | undefined =>
+  words.find((w) => text.includes(w));
+
+/** 最初に当てはまった型 */
+const firstMatched = <T extends { re: RegExp }>(text: string, patterns: readonly T[]): T | undefined =>
+  patterns.find((p) => p.re.test(text));
 
 export function checkDialogue(dialogue: string): RuleViolation[] {
   const v: RuleViolation[] = [];
+  const violation = (rule: string, detail: string) => v.push({ rule, detail, severity: "violation" });
+  const warning = (rule: string, detail: string) => v.push({ rule, detail, severity: "warning" });
 
-  for (const p of PRONOUNS) {
-    if (dialogue.includes(p)) {
-      v.push({ rule: "一人称代名詞(D31)", detail: `「${p}」を含む`, severity: "violation" });
-      break;
-    }
+  const pronoun = firstIncluded(dialogue, PRONOUNS);
+  if (pronoun) violation("一人称代名詞(D31)", `「${pronoun}」を含む`);
+
+  // 絵文字や結合文字を1字と数えるため、コードポイントで数える
+  const length = [...dialogue].length;
+  if (length > MAX_DIALOGUE_CHARS) {
+    violation("字数", `${length}字（上限${MAX_DIALOGUE_CHARS}字）`);
   }
 
-  if ([...dialogue].length > MAX_CHARS) {
-    v.push({
-      rule: "字数",
-      detail: `${[...dialogue].length}字（上限${MAX_CHARS}字）`,
-      severity: "violation",
-    });
-  }
+  const measurement = firstMatched(dialogue, MEASUREMENT_PATTERNS);
+  if (measurement) violation("計測値の露出(原則2)", measurement.label);
 
-  for (const m of MEASUREMENT_PATTERNS) {
-    if (m.re.test(dialogue)) {
-      v.push({ rule: "計測値の露出(原則2)", detail: m.label, severity: "violation" });
-      break;
-    }
-  }
+  if (EMOJI.test(dialogue)) violation("絵文字・顔文字", "含まれている");
 
-  if (EMOJI.test(dialogue)) {
-    v.push({ rule: "絵文字・顔文字", detail: "含まれている", severity: "violation" });
-  }
+  const blaming = firstIncluded(dialogue, BLAMING);
+  if (blaming) violation("ユーザーを責める(D30)", `「${blaming}」を含む`);
 
-  for (const b of BLAMING) {
-    if (dialogue.includes(b)) {
-      v.push({ rule: "ユーザーを責める(D30)", detail: `「${b}」を含む`, severity: "violation" });
-      break;
-    }
-  }
+  const commanding = firstIncluded(dialogue, COMMANDING);
+  if (commanding) violation("ユーザーへの命令", `「${commanding}」を含む`);
 
-  for (const c of COMMANDING) {
-    if (dialogue.includes(c)) {
-      v.push({ rule: "ユーザーへの命令", detail: `「${c}」を含む`, severity: "violation" });
-      break;
-    }
-  }
+  const requesting = firstIncluded(dialogue, REQUESTING);
+  if (requesting) warning("ユーザーへの依頼", `「${requesting}」を含む。状態の表明か、お願いか`);
 
-  for (const r of REQUESTING) {
-    if (dialogue.includes(r)) {
-      v.push({
-        rule: "ユーザーへの依頼",
-        detail: `「${r}」を含む。状態の表明か、お願いか`,
-        severity: "warning",
-      });
-      break;
-    }
-  }
-
-  for (const c of CALLING_ATTENTION) {
-    if (c.re.test(dialogue)) {
-      v.push({
-        rule: "行動をうながす呼びかけ",
-        detail: `「${c.label}」を含む`,
-        severity: "warning",
-      });
-      break;
-    }
-  }
+  const calling = firstMatched(dialogue, CALLING_ATTENTION);
+  if (calling) warning("行動をうながす呼びかけ", `「${calling.label}」を含む`);
 
   return v;
 }
@@ -145,14 +120,7 @@ export function checkDialogue(dialogue: string): RuleViolation[] {
 const SUBJECTIVE = ["元気", "かわいい", "きれい", "美しい", "つらそう", "うれしそう", "悲しそう"];
 
 export function checkAppearances(appearances: string[]): RuleViolation[] {
-  const v: RuleViolation[] = [];
-  for (const a of appearances) {
-    for (const s of SUBJECTIVE) {
-      if (a.includes(s)) {
-        v.push({ rule: "観察に主観が混入", detail: `「${a}」`, severity: "warning" });
-        break;
-      }
-    }
-  }
-  return v;
+  return appearances
+    .filter((a) => firstIncluded(a, SUBJECTIVE) !== undefined)
+    .map((a) => ({ rule: "観察に主観が混入", detail: `「${a}」`, severity: "warning" }));
 }

@@ -12,7 +12,7 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { checkDialogue } from "../diagnosis/rules.js";
+import { checkDialogue, MAX_DIALOGUE_CHARS } from "../diagnosis/rules.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const dialoguesDir = resolve(here, "../../../content/dialogues");
@@ -105,12 +105,12 @@ if (dupes.length === 0) {
   }
 }
 
-// 文字数の分布。40字は上限であり、実際は短いほうが吹き出しに収まる
+// 文字数の分布。上限は上限であり、実際は短いほうが吹き出しに収まる
 const lengths = entries.map((e) => [...e.line].length);
 const max = Math.max(...lengths);
 const avg = lengths.reduce((a, b) => a + b, 0) / lengths.length;
 console.log("\n--- 文字数 ---");
-console.log(`  平均 ${avg.toFixed(1)}字 / 最長 ${max}字（上限40字）`);
+console.log(`  平均 ${avg.toFixed(1)}字 / 最長 ${max}字（上限${MAX_DIALOGUE_CHARS}字）`);
 
 console.log("\n" + "=".repeat(48));
 console.log(

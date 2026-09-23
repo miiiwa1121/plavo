@@ -92,6 +92,9 @@ public enum Metrics {
     /// 土壌水分の急上昇＝水やりとみなす閾値（ポイント）
     public static let wateringJumpThreshold = 12.0
 
+    /// 乾き方を測る区間の始まり（列の長さに対する割合）。直近4分の1を使う
+    private static let dryingWindowStart = 0.75
+
     /// 土壌水分の急上昇から水やりの発生を検出する（D4-a / D7）
     public static func detectWateringEvents(_ readings: [SensorReading]) -> [Date] {
         guard readings.count >= 2 else { return [] }
@@ -113,11 +116,11 @@ public enum Metrics {
         if last.soilMoisture <= profile.soilMoistureFloor { return 0 }
 
         // 直近4分の1区間の減衰率を使う。水やり直後の跳ね上がりを避けるため区間を限定する
-        let fromIndex = Int(Double(readings.count) * 0.75)
+        let fromIndex = Int(Double(readings.count) * dryingWindowStart)
         guard fromIndex < readings.count else { return nil }
         let from = readings[fromIndex]
 
-        let dtDays = last.measuredAt.timeIntervalSince(from.measuredAt) / 86_400
+        let dtDays = last.measuredAt.timeIntervalSince(from.measuredAt) / TimeSpan.day
         guard dtDays > 0 else { return nil }
 
         let dropPerDay = (from.soilMoisture - last.soilMoisture) / dtDays
@@ -134,14 +137,18 @@ public enum Metrics {
     public static func currentStage(_ observations: [PlantObservation]) -> GrowthStage? {
         guard let latest = observations.last else { return nil }
         if latest.stage == .withered { return .withered }
+        return furthestStage(observations)
+    }
 
-        var maxIndex = -1
-        for o in observations {
-            if let i = GrowthStage.order.firstIndex(of: o.stage), i > maxIndex {
-                maxIndex = i
-            }
-        }
-        return maxIndex >= 0 ? GrowthStage.order[maxIndex] : nil
+    /// これまでに到達したいちばん先の段階。**枯死は数えない。**
+    ///
+    /// 見送った株でも、咲いて種を結んだことは消えない。`currentStage` は枯死を返すので、
+    /// 「どこまで育ったか」を問うところ（これまでの歩み）ではこちらを使う
+    public static func furthestStage(_ observations: [PlantObservation]) -> GrowthStage? {
+        observations
+            .compactMap { GrowthStage.order.firstIndex(of: $0.stage) }
+            .max()
+            .map { GrowthStage.order[$0] }
     }
 
     // MARK: - 環境の評価

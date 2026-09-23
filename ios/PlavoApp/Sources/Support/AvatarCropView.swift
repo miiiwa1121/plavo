@@ -1,3 +1,4 @@
+import PhotosUI
 import SwiftUI
 
 /// アイコンにする範囲を決める。
@@ -174,5 +175,61 @@ struct AvatarCropView: View {
         guard image.imageOrientation != .up else { return image }
         let renderer = UIGraphicsImageRenderer(size: image.size)
         return renderer.image { _ in image.draw(in: CGRect(origin: .zero, size: image.size)) }
+    }
+}
+
+// MARK: - 写真を選んでアイコンにする
+
+/// 切り抜き画面へ渡すための包み
+struct PickedImage: Identifiable {
+    let id = UUID()
+    let image: UIImage
+}
+
+extension View {
+    /// 写真を選んだら切り抜き画面を開き、決まった1枚を渡す。株のアイコンと自分のアイコンで同じ流れ。
+    ///
+    /// そのまま丸く切ると狙った場所が入らないので、範囲を選ばせる
+    func avatarPicking(_ item: Binding<PhotosPickerItem?>, onCropped: @escaping (Data) -> Void) -> some View {
+        modifier(AvatarPicking(item: item, onCropped: onCropped))
+    }
+}
+
+private struct AvatarPicking: ViewModifier {
+    @Binding var item: PhotosPickerItem?
+    let onCropped: (Data) -> Void
+    @State private var cropTarget: PickedImage?
+
+    func body(content: Content) -> some View {
+        content
+            .onChange(of: item) { _, picked in
+                guard let picked else { return }
+                Task {
+                    // **読めても読めなくても選択を外す。**残すと、同じ写真を選び直しても
+                    // 変化が起きず、二度と読み直せない
+                    defer { item = nil }
+                    guard let image = await picked.loadImage() else {
+                        // 来場者のせいではない（原則3）。進めなかったことだけを返す
+                        Haptics.caution()
+                        return
+                    }
+                    cropTarget = PickedImage(image: image)
+                }
+            }
+            .sheet(item: $cropTarget) { picked in
+                AvatarCropView(image: picked.image, onDone: onCropped)
+            }
+    }
+}
+
+extension PhotosPickerItem {
+    /// 選ばれた写真のデータ。読めなければ nil
+    func loadData() async -> Data? {
+        try? await loadTransferable(type: Data.self)
+    }
+
+    /// 選ばれた写真を画像として。読めなければ nil
+    func loadImage() async -> UIImage? {
+        await loadData().flatMap(UIImage.init(data:))
     }
 }

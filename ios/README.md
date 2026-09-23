@@ -4,7 +4,7 @@ plavo の iOS 実装。技術スタックは Swift + SwiftUI + ARKit + Vision + 
 
 | ディレクトリ | 内容 | 状態 |
 |---|---|---|
-| [PlavoCore/](./PlavoCore/) | ドメイン層の Swift Package。UI にも AR にも依存しない | **動作する。33件のテストが通る** |
+| [PlavoCore/](./PlavoCore/) | ドメイン層の Swift Package。UI にも AR にも依存しない | **動作する。62件のテストが通る** |
 | PlavoApp/ | アプリ本体（タブ・AR・カメラ） | 未着手 |
 
 ## PlavoCore
@@ -26,6 +26,8 @@ swift test
 | `DialogueBank.swift` | セリフのプールの読み込みと選択 |
 | `MetricCatalog.swift` | 育成のグラフに出す項目の定義（D44）。**項目を足すときはここに1行** |
 | `MetricSeries.swift` | 項目ごとの値の列・まとめ方・日長の計算・10分ごとの平均・同梱ファイルの読み込み |
+| `PhotoGridLayout.swift` | プロフィールの写真の並び（2本指で列が変わる）の配置の計算 |
+| `TimeSpan.swift` | 時間の長さ（分・時・日・週）の秒数。`86_400` のような数字を式に直接書かないため |
 
 ### TypeScript版との同値性
 
@@ -119,6 +121,8 @@ xcrun simctl launch <device> dev.plavo.PlavoApp -startTab 2
 | 3 | トーク |
 | 4 | プロフィール |
 
+値は `AppTab`（RootView.swift）の番号。タブの並びを変えたら、この表も直す。
+
 マイプラントの詳細を直接開くこともできる（動作確認用）。
 
 ```bash
@@ -128,7 +132,7 @@ xcrun simctl launch <device> dev.plavo.PlavoApp -startTab 1 -openDetail YES -sta
 | 引数 | 効き目 |
 |---|---|
 | `-openDetail YES` | 先頭の株の詳細を開く。**起動直後に1回だけ効く**（一覧へ戻ればそのまま一覧に留まる） |
-| `-startDetailPage <0〜2>` | `-openDetail` で開いた詳細を、そのページから始める。0 記録 / 1 育成 / 2 ギャラリー |
+| `-startDetailPage <0〜3>` | `-openDetail` で開いた詳細を、そのページから始める。0 記録 / 1 育成 / 2 写真 / 3 パラパラ（`PlantDetailPage`） |
 
 ### 実機が必要な部分
 

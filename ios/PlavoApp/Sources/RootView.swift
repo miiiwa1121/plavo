@@ -8,44 +8,45 @@ import SwiftUI
 /// 展示のフロー（説明 → AR → 時系列 → センサー）は説明員と物理配置が担う。
 /// アプリの構造とは関係しない。
 struct RootView: View {
-    @State private var model = AppModel()
+    /// 持ち主は `PlavoApp`。ここで作らない（作り直されるたびに作ってしまう）
+    let model: AppModel
     @Environment(\.scenePhase) private var scenePhase
-    @State private var selection: Int = Self.initialTab
+    @State private var selection: AppTab = Self.initialTab
 
     /// 起動引数でタブを指定できる。動作確認と、展示中に説明員が
     /// 特定のタブから始めたい場面で使う。
     ///   例: -startTab 2
-    private static var initialTab: Int {
-        guard let raw = UserDefaults.standard.string(forKey: "startTab"),
-            let index = Int(raw), (0..<5).contains(index)
-        else { return 0 }
-        return index
+    private static var initialTab: AppTab {
+        UserDefaults.standard.string(forKey: "startTab")
+            .flatMap(Int.init)
+            .flatMap(AppTab.init(rawValue:))
+            ?? .camera
     }
 
     var body: some View {
         TabView(selection: $selection) {
             // タブバーはアイコンだけにする。名前は読み上げのために残す
-            Tab(value: 0) {
+            Tab(value: AppTab.camera) {
                 CameraTab(model: model)
             } label: {
                 Label("カメラ", systemImage: "camera.viewfinder").labelStyle(.iconOnly)
             }
-            Tab(value: 1) {
+            Tab(value: AppTab.myPlant) {
                 MyPlantTab(model: model)
             } label: {
                 Label("マイプラント", systemImage: "leaf").labelStyle(.iconOnly)
             }
-            Tab(value: 2) {
+            Tab(value: AppTab.diary) {
                 DiaryTab(model: model)
             } label: {
                 Label("日記", systemImage: "book").labelStyle(.iconOnly)
             }
-            Tab(value: 3) {
+            Tab(value: AppTab.talk) {
                 TalkTab()
             } label: {
                 Label("トーク", systemImage: "bubble.left.and.bubble.right").labelStyle(.iconOnly)
             }
-            Tab(value: 4) {
+            Tab(value: AppTab.profile) {
                 MyPageTab(model: model)
             } label: {
                 Label("プロフィール", systemImage: "person").labelStyle(.iconOnly)
@@ -62,4 +63,14 @@ struct RootView: View {
             if phase == .active { model.store.ensureTodayPage() }
         }
     }
+}
+
+/// タブの並び。**番号は起動引数 `-startTab` の値**（ios/README.md の表）。
+/// 並びを変えるときは README の表も直す
+enum AppTab: Int, CaseIterable {
+    case camera
+    case myPlant
+    case diary
+    case talk
+    case profile
 }

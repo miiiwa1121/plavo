@@ -6,14 +6,26 @@
 // 起動: npm run sensor
 // 仕様: docs/design/gadget-interface.md
 
-import { createServer } from "node:http";
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { networkInterfaces } from "node:os";
 import { clear, gadgets, latest, recent, record, validate } from "./store.js";
 import type { SensorPayload } from "./store.js";
 
 const PORT = Number(process.env.PORT ?? 8787);
 
-function json(res: import("node:http").ServerResponse, status: number, body: unknown): void {
+/**
+ * 受け取る本文の上限。1点のペイロードは 300 バイトほどなので、十分に余裕がある。
+ * **上限を置かないと、同じネットワークの誰かが巨大な本文を送るだけでメモリを食い尽くせる。**
+ */
+const MAX_BODY_BYTES = 16 * 1024;
+
+/** `/sensor/recent` で秒数を省いたときに返す長さ */
+const DEFAULT_RECENT_SECONDS = 300;
+
+/** 本文が上限を超えた */
+class PayloadTooLargeError extends Error {}
+
+function json(res: ServerResponse, status: number, body: unknown): void {
   const text = JSON.stringify(body);
   res.writeHead(status, {
     "Content-Type": "application/json; charset=utf-8",
@@ -22,9 +34,19 @@ function json(res: import("node:http").ServerResponse, status: number, body: unk
   res.end(text);
 }
 
-async function readBody(req: import("node:http").IncomingMessage): Promise<unknown> {
+/** 本文を JSON として読む。空なら null、壊れていれば undefined */
+async function readBody(req: IncomingMessage): Promise<unknown> {
+  const declared = Number(req.headers["content-length"]);
+  if (declared > MAX_BODY_BYTES) throw new PayloadTooLargeError();
+
   const chunks: Buffer[] = [];
-  for await (const chunk of req) chunks.push(chunk as Buffer);
+  let size = 0;
+  for await (const chunk of req) {
+    size += (chunk as Buffer).length;
+    // Content-Length を偽って送られても、読んだ量で止める
+    if (size > MAX_BODY_BYTES) throw new PayloadTooLargeError();
+    chunks.push(chunk as Buffer);
+  }
   if (chunks.length === 0) return null;
   try {
     return JSON.parse(Buffer.concat(chunks).toString("utf-8"));
@@ -33,8 +55,14 @@ async function readBody(req: import("node:http").IncomingMessage): Promise<unkno
   }
 }
 
-const server = createServer(async (req, res) => {
-  const url = new URL(req.url ?? "/", `http://${req.headers.host}`);
+async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  // **基準の URL に Host ヘッダを使わない。**壊れた Host で URL の組み立てが例外を投げる
+  let url: URL;
+  try {
+    url = new URL(req.url ?? "/", "http://localhost");
+  } catch {
+    return json(res, 400, { error: "パスを読めませんでした" });
+  }
 
   // アプリが疎通を確かめるために叩く
   if (req.method === "GET" && url.pathname === "/health") {
@@ -65,7 +93,10 @@ const server = createServer(async (req, res) => {
   if (req.method === "GET" && url.pathname === "/sensor/recent") {
     const gadgetId = url.searchParams.get("gadgetId");
     if (!gadgetId) return json(res, 400, { error: "gadgetId が必要です" });
-    const seconds = Number(url.searchParams.get("seconds") ?? 300);
+    const seconds = Number(url.searchParams.get("seconds") ?? DEFAULT_RECENT_SECONDS);
+    if (!Number.isFinite(seconds) || seconds <= 0) {
+      return json(res, 400, { error: "seconds は正の数が必要です" });
+    }
     return json(res, 200, recent(gadgetId, seconds));
   }
 
@@ -77,6 +108,28 @@ const server = createServer(async (req, res) => {
   }
 
   json(res, 404, { error: "そのパスはありません" });
+}
+
+/**
+ * 1件の失敗でサーバーを落とさない。
+ *
+ * **非同期の処理で投げられた例外は、拾わないとプロセスごと終わる**（Node の既定）。
+ * 途中で切れた送信や、壊れたリクエスト1つで展示中の中継が止まってしまう。
+ */
+const server = createServer((req, res) => {
+  route(req, res).catch((error: unknown) => {
+    if (error instanceof PayloadTooLargeError) {
+      // 残りを読まずに接続を閉じる。読み続けると上限を置いた意味が無い
+      res.setHeader("Connection", "close");
+      return json(res, 413, { error: `本文は ${MAX_BODY_BYTES} バイトまでです` });
+    }
+    console.error(`リクエストの処理に失敗しました: ${req.method} ${req.url}`, error);
+    if (res.headersSent) {
+      res.destroy();
+    } else {
+      json(res, 500, { error: "サーバーの内部で失敗しました" });
+    }
+  });
 });
 
 /** スマホから繋ぐためのアドレスを表示する。テザリング経由のIPを探す */

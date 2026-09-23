@@ -17,6 +17,8 @@ import {
   daysToNextWatering,
   detectWateringEvents,
   dli,
+  extent,
+  MS_PER_DAY,
   vpd,
 } from "./metrics.js";
 
@@ -64,9 +66,7 @@ function round(n: number, digits = 0): number {
 }
 
 function daysBetween(from: string, to: string): number {
-  return Math.floor(
-    (new Date(to).getTime() - new Date(from).getTime()) / 86_400_000,
-  );
+  return Math.floor((new Date(to).getTime() - new Date(from).getTime()) / MS_PER_DAY);
 }
 
 function formatDateTime(iso: string): string {
@@ -88,8 +88,9 @@ export function buildContextBlock(
   if (readings.length === 0) throw new Error("readings が空です");
 
   const last = readings[readings.length - 1]!;
-  const moistures = readings.map((r) => r.soilMoisture);
-  const temps = readings.map((r) => r.temperature);
+  // readings が空でないことは上で確かめてある
+  const moistures = extent(readings.map((r) => r.soilMoisture))!;
+  const temps = extent(readings.map((r) => r.temperature))!;
 
   const lines: string[] = [];
 
@@ -111,9 +112,9 @@ export function buildContextBlock(
     .join(" → ");
 
   lines.push(
-    `土の湿り: 今 ${round(last.soilMoisture)}% / 今日 最高${round(
-      Math.max(...moistures),
-    )}% 最低${round(Math.min(...moistures))}%`,
+    `土の湿り: 今 ${round(last.soilMoisture)}% / 今日 最高${round(moistures.max)}% 最低${round(
+      moistures.min,
+    )}%`,
   );
   if (moistureTrend) lines.push(`  推移: ${moistureTrend} → 今${round(last.soilMoisture)}%`);
 
@@ -133,9 +134,7 @@ export function buildContextBlock(
   if (lightTrend) lines.push(`  推移: ${lightTrend}`);
 
   lines.push(
-    `気温: 今 ${round(last.temperature)}℃ / 今日 最高${round(
-      Math.max(...temps),
-    )}℃ 最低${round(Math.min(...temps))}℃`,
+    `気温: 今 ${round(last.temperature)}℃ / 今日 最高${round(temps.max)}℃ 最低${round(temps.min)}℃`,
   );
   lines.push(`湿度: 今 ${round(last.humidity)}%`);
   lines.push(`養分: EC ${round(last.nutrientEc, 1)} mS/cm`);

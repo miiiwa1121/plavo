@@ -26,11 +26,26 @@ const imagesDir = resolve(here, "../../fixtures/images");
 
 // --- 引数 -----------------------------------------------------------------
 const args = process.argv.slice(2);
+
+/** `--name 値` の値。**付けたのに値が無ければ止める。**黙って全件を走らせると費用が掛かる */
+function option(name: string): string | undefined {
+  const i = args.indexOf(`--${name}`);
+  if (i < 0) return undefined;
+  const value = args[i + 1];
+  if (value === undefined || value.startsWith("--")) {
+    console.error(`--${name} の値がありません`);
+    process.exit(1);
+  }
+  return value;
+}
+
 const dryRun = args.includes("--dry-run");
-const scenarioArg = args[args.indexOf("--scenario") + 1];
-const only = args.includes("--scenario") ? scenarioArg : undefined;
-const repeatArg = args[args.indexOf("--repeat") + 1];
-const repeat = args.includes("--repeat") ? Number(repeatArg) : 1;
+const only = option("scenario");
+const repeat = Number(option("repeat") ?? 1);
+if (!Number.isInteger(repeat) || repeat < 1) {
+  console.error(`--repeat は1以上の整数で指定してください（受け取った値: ${option("repeat")}）`);
+  process.exit(1);
+}
 
 // --- シナリオの読み込み ---------------------------------------------------
 const names = readdirSync(sensorsDir)

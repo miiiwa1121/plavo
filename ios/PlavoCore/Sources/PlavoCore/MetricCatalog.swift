@@ -82,42 +82,42 @@ public struct MetricDefinition: Sendable, Identifiable {
 
 public enum MetricCatalog {
 
-    private static let tenMinutes: TimeInterval = 600
-    private static let oneDay: TimeInterval = 86_400
+    /// センサーの項目をまとめる刻み。届いた値はこの幅の平均にして積む（D44）
+    public static let sensorInterval: TimeInterval = 10 * TimeSpan.minute
 
     /// 画面に並ぶ順
     public static let all: [MetricDefinition] = [
         MetricDefinition(
-            id: .soilMoisture, label: "土壌水分", unit: "%", interval: tenMinutes,
+            id: .soilMoisture, label: "土壌水分", unit: "%", interval: sensorInterval,
             source: .sensor, fractionDigits: 0, fixedDomain: 0...100,
             lowLabel: "乾き気味", highLabel: "湿り気味"),
         MetricDefinition(
-            id: .temperature, label: "気温", unit: "℃", interval: tenMinutes,
+            id: .temperature, label: "気温", unit: "℃", interval: sensorInterval,
             source: .sensor, fractionDigits: 1),
         MetricDefinition(
-            id: .humidity, label: "湿度", unit: "%", interval: tenMinutes,
+            id: .humidity, label: "湿度", unit: "%", interval: sensorInterval,
             source: .sensor, fractionDigits: 0, fixedDomain: 0...100),
         MetricDefinition(
-            id: .lightLux, label: "光量", unit: "lux", interval: tenMinutes,
+            id: .lightLux, label: "光量", unit: "lux", interval: sensorInterval,
             source: .sensor, fractionDigits: 0),
         MetricDefinition(
-            id: .dayLength, label: "日長", unit: "時間", interval: oneDay,
+            id: .dayLength, label: "日長", unit: "時間", interval: TimeSpan.day,
             source: .derived { MetricDerivation.dayLength(from: $0[.lightLux]) },
             style: .bar, fractionDigits: 1),
         MetricDefinition(
-            id: .co2, label: "CO2", unit: "ppm", interval: tenMinutes,
+            id: .co2, label: "CO2", unit: "ppm", interval: sensorInterval,
             source: .sensor, fractionDigits: 0),
         MetricDefinition(
-            id: .soilTemperature, label: "土の温度", unit: "℃", interval: tenMinutes,
+            id: .soilTemperature, label: "土の温度", unit: "℃", interval: sensorInterval,
             source: .sensor, fractionDigits: 1),
         MetricDefinition(
-            id: .nutrientEc, label: "EC（養分）", unit: "mS/cm", interval: tenMinutes,
+            id: .nutrientEc, label: "EC（養分）", unit: "mS/cm", interval: sensorInterval,
             source: .sensor, fractionDigits: 2),
         MetricDefinition(
-            id: .soilPh, label: "pH", unit: "", interval: tenMinutes,
+            id: .soilPh, label: "pH", unit: "", interval: sensorInterval,
             source: .sensor, fractionDigits: 1),
         MetricDefinition(
-            id: .heightCm, label: "草丈", unit: "cm", interval: oneDay,
+            id: .heightCm, label: "草丈", unit: "cm", interval: TimeSpan.day,
             source: .image, style: .point, fractionDigits: 1),
     ]
 

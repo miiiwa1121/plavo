@@ -87,6 +87,20 @@ final class MetricsTests: XCTestCase {
 
     func testEmptyHistoryHasNoStage() {
         XCTAssertNil(Metrics.currentStage([]))
+        XCTAssertNil(Metrics.furthestStage([]))
+    }
+
+    func testFurthestStageKeepsWhatWitheredPlantReached() {
+        // 見送った株でも、咲いて種を結んだことは消えない（これまでの歩み）。
+        // currentStage は枯死を返すので、到達した段階はこちらで問う
+        let history = [observation(.sprout), observation(.bloom), observation(.seedSet), observation(.withered)]
+        XCTAssertEqual(Metrics.currentStage(history), .withered)
+        XCTAssertEqual(Metrics.furthestStage(history), .seedSet)
+    }
+
+    func testFurthestStageDoesNotGoBackward() {
+        let history = [observation(.bud), observation(.trueLeaf)]
+        XCTAssertEqual(Metrics.furthestStage(history), .bud)
     }
 
     // MARK: - プロファイルの差し替え

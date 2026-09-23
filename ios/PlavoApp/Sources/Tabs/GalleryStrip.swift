@@ -106,6 +106,14 @@ struct GalleryStripView: View {
             if playing, ref != played { stop() }
         }
         .onDisappear { stop() }
+        // 列の小さい絵を**裏で先に**開いておく。なぞると何枚も続けて初めて見えるので、
+        // 見えたときにその場で開くと、そのたびに引っかかる
+        .task(id: photos.map(\.ref)) {
+            for photo in photos {
+                if Task.isCancelled { return }
+                _ = await model.store.thumbnailInBackground(photo.ref, maxPixel: StripThumbnail.maxPixel)
+            }
+        }
         .navigationBarTitleDisplayMode(.inline)
         .navigationDestination(isPresented: $showFull) {
             PhotoViewer(photos: photos, current: $current, model: model)
@@ -143,13 +151,10 @@ struct GalleryStripView: View {
                 // 幅と高さの小さいほうに合わせた正方形。低い画面でも入りきる
                 Color.clear
                     .aspectRatio(1, contentMode: .fit)
-                    .overlay {
-                        if let data = model.store.image(photo.ref), let image = UIImage(data: data) {
-                            Image(uiImage: image).resizable().scaledToFill()
-                        } else {
-                            Rectangle().fill(.quaternary)
-                        }
-                    }
+                    // **ページの中身は、写真が変わらない限り作り直さない**（`DisplayPhoto`）。
+                    // 見ている1枚が変わるたびにこの画面は描き直されるので、作り直すと
+                    // 1枚送るごとに全ページの写真を開き直す（列をなぞると固まった）
+                    .overlay { DisplayPhoto(ref: photo.ref, model: model).equatable() }
                     .clipShape(Self.shape)
                     .contentShape(Self.shape)
                     .matchedTransitionSource(id: photo.ref, in: fullZoom) {
@@ -162,6 +167,7 @@ struct GalleryStripView: View {
             }
         }
         .tabViewStyle(.page(indexDisplayMode: .never))
+        .prefetchingNeighbors(of: current, in: photos, store: model.store)
     }
 
     private static var shape: RoundedRectangle {
@@ -174,7 +180,7 @@ struct GalleryStripView: View {
     private var caption: some View {
         HStack(spacing: 8) {
             if let photo = photos.first(where: { $0.ref == current }) {
-                Text(format(photo.date))
+                Text(DateLabel.monthDay(photo.date))
                     .font(.subheadline.weight(.semibold))
                 // 株をまたいで並べるときは、何日目ではなくどの子かを言う。
                 // 「何日目」はページの主役のもので、写っている子のものとは限らない
@@ -332,8 +338,10 @@ struct GalleryStripView: View {
                 }
             }
             .onScrollGeometryChange(for: CGFloat.self) { $0.contentOffset.x } action: { _, offset in
-                // 自分で送った位置の変化は拾わない。指でなぞったときだけメインを追わせる
-                guard scrubbing else { return }
+                // 自分で送った位置の変化は拾わない。指でなぞったときだけメインを追わせる。
+                // 最後の1枚を消して閉じる途中は空になる。空の並びから引くと落ちる
+                let photos = self.photos
+                guard scrubbing, !photos.isEmpty else { return }
                 let ref = photos[Self.index(centeredAt: offset, count: photos.count)].ref
                 if ref != current { switchInstantly(to: ref) }
             }
@@ -371,13 +379,6 @@ struct GalleryStripView: View {
         transaction.disablesAnimations = true
         withTransaction(transaction) { current = ref }
     }
-
-    private func format(_ date: Date) -> String {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "ja_JP")
-        f.dateFormat = "M月d日"
-        return f.string(from: date)
-    }
 }
 
 /// 列の1枚。
@@ -390,6 +391,9 @@ private struct StripThumbnail: View {
     let expanded: Bool
     let model: AppModel
 
+    /// 列の絵の大きさ（長辺の画素）。先に開いておくとき（`GalleryStripView`）も同じ値で開く
+    static let maxPixel: CGFloat = 200
+
     var body: some View {
         Color.clear
             .frame(
@@ -398,7 +402,7 @@ private struct StripThumbnail: View {
             )
             .overlay {
                 // 列は小さい絵を通す。なぞると何枚も一度に入れ替わる
-                if let image = model.store.thumbnail(ref, maxPixel: 200) {
+                if let image = model.store.thumbnail(ref, maxPixel: Self.maxPixel) {
                     Image(uiImage: image).resizable().scaledToFill()
                 } else {
                     Rectangle().fill(.quaternary)
@@ -425,17 +429,14 @@ private struct PhotoViewer: View {
     var body: some View {
         TabView(selection: $current) {
             ForEach(photos, id: \.ref) { photo in
-                Group {
-                    if let data = model.store.image(photo.ref), let image = UIImage(data: data) {
-                        Image(uiImage: image).resizable().scaledToFit()
-                    } else {
-                        Color.black
-                    }
-                }
-                .tag(photo.ref)
+                // 写真が変わらない限り作り直さない（メインと同じ理由）
+                DisplayPhoto(ref: photo.ref, model: model, contentMode: .fit, placeholder: .black)
+                    .equatable()
+                    .tag(photo.ref)
             }
         }
         .tabViewStyle(.page(indexDisplayMode: .never))
+        .prefetchingNeighbors(of: current, in: photos, store: model.store)
         .background(Color.black.ignoresSafeArea())
         .navigationBarTitleDisplayMode(.inline)
     }

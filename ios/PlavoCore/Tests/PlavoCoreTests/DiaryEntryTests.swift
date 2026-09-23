@@ -115,6 +115,27 @@ final class DiaryEntryTests: XCTestCase {
         XCTAssertTrue(entry([flipbookShot(himari)]).isRest)
     }
 
+    // MARK: - ムービーは枠に数えない（D58）
+
+    private func movieShot(_ plantId: UUID) -> DiaryPhoto {
+        DiaryPhoto(ref: UUID().uuidString, plantId: plantId, fromCamera: true, movie: true)
+    }
+
+    /// ムービーは、撮影の3枚にも日記の10枚にも数えない。日記のページにも並ばず、ギャラリーには並ぶ
+    func testMovieDoesNotCountTowardOtherLimits() {
+        let page = entry(cameraShots(himari, 2) + [movieShot(himari)])
+
+        XCTAssertEqual(page.shotCount(of: himari), 2)
+        XCTAssertEqual(page.photoCount, 2)
+        XCTAssertEqual(page.diaryPhotos.count, 2)
+        XCTAssertEqual(page.galleryPhotos.count, 3)
+    }
+
+    /// ムービーだけの日は、日記ではお休みの日
+    func testPageWithOnlyMovieIsRest() {
+        XCTAssertTrue(entry([movieShot(himari)]).isRest)
+    }
+
     /// 削除すれば（両方から外れれば）、その日のパラパラをもう一度撮れる
     func testDeletedFlipbookFreesTheSlot() {
         var photo = flipbookShot(himari)

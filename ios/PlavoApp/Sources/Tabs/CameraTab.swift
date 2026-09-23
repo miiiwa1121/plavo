@@ -19,6 +19,8 @@ struct CameraTab: View {
 
     /// シャッターの種類。左右にスライドして切り替える
     @State private var shutterMode: ShutterMode = .capture
+    /// ムービーを撮っている最中か。上中央のアイコンの周りに輪を回す（D58）
+    @State private var recordingMovie = false
     /// 植物の追加で止めている1枚。確認のあいだ画面に残す
     @State private var pendingCapture: CapturedPlant?
     /// 左下の1枚を開いているか。開いている写真の参照を持つ（D42）
@@ -40,7 +42,19 @@ struct CameraTab: View {
     /// ただし速すぎると説明を聞いている間に危険域まで落ちる。
     /// 水やり後（約60%）から適正の下限（25%）まで、およそ60秒かかる速さ。
     private let dryingRate: Double = 0.6
-    private let tick = Timer.publish(every: 0.5, on: .main, in: .common).autoconnect()
+    /// モックで土を乾かす刻み（秒）
+    private static let tickInterval: TimeInterval = 0.5
+    private let tick = Timer.publish(every: tickInterval, on: .main, in: .common).autoconnect()
+
+    /// モックの「水をあげる」で上がる量（ポイント）。水やりは数分で土に染みるので、1回で跳ね上がる。
+    /// モックのガジェット（server/src/sensor/mock-gadget.ts）と同じ
+    private static let mockWateringJump: Double = 45
+
+    /// 見つけた直後の挨拶を見せておく時間。この後で土の状態に応じたセリフへ移る
+    private static let greetingHold: Duration = .seconds(1.2)
+
+    /// シャッターの下の余白。直近の1枚もこの高さに合わせる
+    private static let shutterBottomPadding: CGFloat = 28
 
     /// 誰も見ていない状態（D40-a）。弧で「未設定」を選んでいる。
     ///
@@ -221,13 +235,7 @@ struct CameraTab: View {
                 nameFieldFocused = true
                 return
             }
-            // 検出直後の一言。通信不要で即座に出る（D27）
-            line = model.greeting() ?? ""
-            // 続けて状態に応じたセリフへ移る
-            Task {
-                try? await Task.sleep(for: .seconds(1.2))
-                refreshLine(force: true)
-            }
+            greetThenSettle()
         case .panel(let key, _):
             // パネルではAI診断を走らせず、その日の記録を再生する（D33）
             guard let panel = model.bank?.panel(key) else { return }
@@ -235,6 +243,16 @@ struct CameraTab: View {
             // 紙であって生き物ではない
             Haptics.tap()
             line = model.picker.pick(from: panel.lines, group: "panel-\(key)") ?? ""
+        }
+    }
+
+    /// 挨拶してから、土の状態に応じたセリフへ移る。
+    /// 挨拶は通信不要で即座に出る（D27）
+    private func greetThenSettle() {
+        line = model.greeting() ?? ""
+        Task {
+            try? await Task.sleep(for: Self.greetingHold)
+            refreshLine(force: true)
         }
     }
 
@@ -277,7 +295,7 @@ struct CameraTab: View {
 
     private func dryIfMocked() {
         guard !model.usingRealSensor, case .plant = scene.subject else { return }
-        model.updateMoisture(max(0, model.soilMoisture - dryingRate * 0.5))
+        model.updateMoisture(max(0, model.soilMoisture - dryingRate * Self.tickInterval))
         // **名前をつけている間はセリフを引き直さない。**
         // 引き直すと「はじめまして。名前をつけてくれる？」が
         // 0.5秒後の最初の刻みで水分のセリフに置き換わる。
@@ -298,11 +316,9 @@ struct CameraTab: View {
             ShutterBar(
                 mode: $shutterMode,
                 onFire: { Task { await fire() } },
-                disabled: scene.isCapturing,
-                // **「迎える」は塞がない。**未設定から出る道がそこにある
-                blocked: unassigned ? [.capture, .flipbook] : []
+                disabled: scene.isCapturing
             )
-            .padding(.bottom, 28)
+            .padding(.bottom, Self.shutterBottomPadding)
         }
     }
 
@@ -323,8 +339,8 @@ struct CameraTab: View {
                 Spacer()
             }
             .padding(.leading, 22)
-            // シャッター（高さ72・下余白28）の中心に合わせる
-            .padding(.bottom, 28 + (72 - thumbnailSize) / 2)
+            // シャッターの中心に合わせる
+            .padding(.bottom, Self.shutterBottomPadding + (ShutterBar.bigSize - thumbnailSize) / 2)
         }
     }
 
@@ -363,12 +379,13 @@ struct CameraTab: View {
 
     private var thumbnailSize: CGFloat { 52 }
     /// 枠と切り抜きで同じ形を使う。片方だけ角丸が変わると線がずれる
-    private var thumbnailShape: RoundedRectangle { RoundedRectangle(cornerRadius: 10) }
+    private var thumbnailShape: RoundedRectangle { RoundedRectangle(cornerRadius: 14) }
 
     private func fire() async {
         switch shutterMode {
         case .flipbook: await captureFlipbook()
         case .capture: await capture()
+        case .movie: await captureMovie()
         case .addPlant: await captureForAdd()
         }
     }
@@ -379,11 +396,14 @@ struct CameraTab: View {
         // 撮影には間がある。まず「受け取った」を返す
         Haptics.tap()
         guard let data = await scene.capturePhoto(), let image = UIImage(data: data) else {
-            captureNotice = "撮れませんでした"
-            Haptics.caution()
+            refuse("撮れませんでした")
             return
         }
-        let analysis = SceneController.analyze(image: image)
+        // **植物を探すのは裏で。**分類と前景マスクは古い端末で数百ミリ秒かかり、
+        // ここで画面の仕事を止めると、シャッターを押したまま固まって見える
+        let analysis = await Task.detached(priority: .userInitiated) {
+            SceneController.analyze(image: image)
+        }.value
         // 確認のあいだは、いま見ている相手を一度手放して検出も止める。
         // 止めないと、確かめている裏で映像の側が別の相手を決めてしまう
         scene.redetect()
@@ -416,45 +436,71 @@ struct CameraTab: View {
     }
 
     private func capture() async {
-        // **撮った相手は、いま弧で見ている株**（D54）。
-        // `plantForToday` は「その日のページの主役」で生きている株を先に選ぶため、
-        // 見送ったひまりを見ていても、こすもの写真として積まれていた
-        guard let plantId = model.store.selectedPlantId else {
-            captureNotice = "先に「迎える」で迎えてね"
-            Haptics.caution()
-            return
-        }
+        guard let plantId = plantToShoot() else { return }
         model.store.ensureTodayPage()
         model.store.attachPlantToToday(plantId)
 
         guard let today = model.store.todayEntry() else { return }
         // 撮影は1株につき3枚（D54）。どの株が満ちたのかが分かるように名前を添える
-        let name = model.store.plant(plantId)?.name ?? "この子"
+        let name = plantName(plantId)
         guard today.canShoot(plantId) else {
-            captureNotice = "\(name)は今日もう\(DiaryEntry.maxShotsPerPlantPerDay)枚撮りました"
-            Haptics.caution()
+            refuse("\(name)は今日もう\(DiaryEntry.maxShotsPerPlantPerDay)枚撮りました")
             return
         }
         // 日記のページ全体にも上限がある。「+」で足した写真も、ほかの株の写真も数える
         guard today.canAddPhoto else {
-            captureNotice = "今日の日記はもう\(DiaryEntry.maxPhotosPerDay)枚あります"
-            Haptics.caution()
+            refuse("今日の日記はもう\(DiaryEntry.maxPhotosPerDay)枚あります")
             return
         }
 
-        // **押した瞬間には撮影の手応えを返さない。**
-        // `captureHighResolutionFrame` には間があるので、まだ撮れていない。
-        // 受け取ったこと（tap）と、撮れたこと（snap）を分ける
-        Haptics.tap()
-        guard let data = await scene.capturePhoto() else {
-            captureNotice = "撮れませんでした"
-            Haptics.caution()
+        guard let data = await takePhoto() else { return }
+        // **足せたときだけ「追加しました」と言う。**撮っている間に枠が埋まることがある
+        guard model.store.addPhoto(data, to: today.id, of: plantId, fromCamera: true) else {
+            refuse("今日の日記に入りきりませんでした")
             return
         }
-        Haptics.snap()
-        model.store.addPhoto(data, to: today.id, of: plantId, fromCamera: true)
         let count = model.store.todayEntry()?.shotCount(of: plantId) ?? 0
         captureNotice = "日記に追加しました（\(name) \(count)/\(DiaryEntry.maxShotsPerPlantPerDay)）"
+    }
+
+    /// 撮る相手。**いま弧で見ている株**（D54）。居なければ断る。
+    ///
+    /// `plantForToday` は「その日のページの主役」で生きている株を先に選ぶため、
+    /// それを使うと、見送ったひまりを見ていても、こすもの写真として積まれていた
+    /// **未設定でもシャッターは塞がない。**押したら触覚（ブー）と知らせで返す。
+    /// 見た目で塞ぐ（斜線）のはやめた
+    private func plantToShoot() -> UUID? {
+        guard let plantId = model.store.selectedPlant?.id else {
+            captureNotice = "植物を選んでね"
+            Haptics.wrong()
+            return nil
+        }
+        return plantId
+    }
+
+    private func plantName(_ plantId: UUID) -> String {
+        model.store.plant(plantId)?.name ?? "この子"
+    }
+
+    /// 1枚撮る。撮れなければ断って nil。
+    ///
+    /// **押した瞬間には撮影の手応えを返さない。**
+    /// `captureHighResolutionFrame` には間があるので、まだ撮れていない。
+    /// 受け取ったこと（tap）と、撮れたこと（snap）を分ける
+    private func takePhoto() async -> Data? {
+        Haptics.tap()
+        guard let data = await scene.capturePhoto() else {
+            refuse("撮れませんでした")
+            return nil
+        }
+        Haptics.snap()
+        return data
+    }
+
+    /// 進めなかったことを短く知らせる。**来場者の失敗としては扱わない**（原則3）
+    private func refuse(_ message: String) {
+        captureNotice = message
+        Haptics.caution()
     }
 
     // MARK: - パラパラ
@@ -488,30 +534,51 @@ struct CameraTab: View {
 
     /// パラパラの1枚を撮る。**1日・1株につき1枚。**撮影の3枚にも日記の10枚にも数えない
     private func captureFlipbook() async {
-        guard let plantId = model.store.selectedPlantId else {
-            captureNotice = "先に「迎える」で迎えてね"
-            Haptics.caution()
-            return
-        }
+        guard let plantId = plantToShoot() else { return }
         model.store.ensureTodayPage()
         guard let today = model.store.todayEntry() else { return }
-        let name = model.store.plant(plantId)?.name ?? "この子"
+        let name = plantName(plantId)
+        let alreadyShot = "\(name)のパラパラは今日もう撮りました"
         guard today.canShootFlipbook(plantId) else {
-            captureNotice = "\(name)のパラパラは今日もう撮りました"
-            Haptics.caution()
+            refuse(alreadyShot)
             return
         }
 
-        // 受け取ったこと（tap）と、撮れたこと（snap）を分ける（撮るときと同じ）
+        guard let data = await takePhoto() else { return }
+        // 撮っている間に同じ株のパラパラが入っていれば、2枚目は足せない
+        guard model.store.addFlipbookPhoto(data, to: today.id, of: plantId) else {
+            refuse(alreadyShot)
+            return
+        }
+        captureNotice = "パラパラに追加しました（\(name)）"
+    }
+
+    // MARK: - ムービー（D58）
+
+    /// 3秒のムービーを撮る。**枠は設けない**（撮影の3枚にも日記の10枚にも数えない）。
+    /// 日記のページには並ばず、ギャラリーとプロフィールに並ぶ
+    private func captureMovie() async {
+        guard let plantId = plantToShoot() else { return }
+        model.store.ensureTodayPage()
+        guard let today = model.store.todayEntry() else { return }
+        let name = plantName(plantId)
+
+        // 押した手応え。撮れた手応え（snap）は録り終えたときに返す
         Haptics.tap()
-        guard let data = await scene.capturePhoto() else {
-            captureNotice = "撮れませんでした"
-            Haptics.caution()
+        recordingMovie = true
+        let movie = await scene.recordMovie(duration: ShutterMode.movieDuration)
+        recordingMovie = false
+        guard let movie else {
+            refuse("撮れませんでした")
+            return
+        }
+        guard model.store.addMovie(movie.url, poster: movie.poster, to: today.id, of: plantId) else {
+            try? FileManager.default.removeItem(at: movie.url)
+            refuse("撮れませんでした")
             return
         }
         Haptics.snap()
-        model.store.addFlipbookPhoto(data, to: today.id, of: plantId)
-        captureNotice = "パラパラに追加しました（\(name)）"
+        captureNotice = "ムービーを追加しました（\(name)）"
     }
 
     // MARK: - 重ねる表示
@@ -542,14 +609,17 @@ struct CameraTab: View {
                     .foregroundStyle(.white)
                     .padding(.horizontal, 18).padding(.vertical, 10)
                     .background(.black.opacity(0.55), in: Capsule())
-                    .task {
+                    // **知らせが変わったら数え直す。**知らせごとに2秒見せる。
+                    // 数え直さないと、続けて出た2つ目が1つ目の残り時間で消えていた
+                    .task(id: notice) {
                         try? await Task.sleep(for: .seconds(2))
+                        guard !Task.isCancelled else { return }
                         captureNotice = nil
                     }
             } else if case .none = scene.subject, !unassigned {
                 // **未設定のときは出さない。**探してすらいないので（D40-a）、
                 // 「見当たらない」は嘘になる。誰も見ていないことは、
-                // ぼけた映像と斜線の入ったシャッターで伝わる。
+                // ぼけた映像で伝わる。
                 //
                 // D24 により、見つからない状態をエラーとして扱わない
                 Text("見当たらないなぁ")
@@ -591,6 +661,15 @@ struct CameraTab: View {
                 PlantAvatar(plant: plant, model: model, size: 44)
                     .overlay(Circle().stroke(.white.opacity(0.85), lineWidth: 2))
                     .shadow(color: .black.opacity(0.35), radius: 6, y: 1)
+                    // ムービーを撮っている3秒で1周する。**あと何秒かを、見ている相手の上で見せる**
+                    .overlay {
+                        if recordingMovie {
+                            RecordingRing(duration: ShutterMode.movieDuration)
+                                .padding(-5)
+                                .transition(.opacity)
+                        }
+                    }
+                    .animation(.easeOut(duration: 0.2), value: recordingMovie)
 
                 Text(plant.name)
                     .font(.caption.weight(.semibold))
@@ -617,7 +696,7 @@ struct CameraTab: View {
 
             Button {
                 // 水やりは数分で土に染みる。1ステップの跳ね上がりとして表現する
-                model.updateMoisture(min(100, model.soilMoisture + 45))
+                model.updateMoisture(min(100, model.soilMoisture + Self.mockWateringJump))
                 // **ここで触覚を鳴らさない。**帯域が `watered` に変わるので、
                 // セリフと一緒に `drink` が返る。押した瞬間にも鳴らすと二重になる
                 refreshLine(force: true)
@@ -697,11 +776,7 @@ struct CameraTab: View {
         isNaming = false
         addingPlant = false
         nameFieldFocused = false
-        line = model.greeting() ?? ""
-        Task {
-            try? await Task.sleep(for: .seconds(1.2))
-            refreshLine(force: true)
-        }
+        greetThenSettle()
     }
 
     /// AR の診断表示。吹き出しが出ないときの切り分けに使う。
@@ -839,4 +914,27 @@ struct CameraTab: View {
         }
     }
 
+}
+
+/// ムービーを撮っている間、アイコンの周りを1周する輪（D58）。
+///
+/// **出た瞬間から回し始める。**`duration` 秒かけて一定の速さで1周する。
+/// 下に薄い輪を敷き、どこまで回れば終わりかを先に見せる
+private struct RecordingRing: View {
+    let duration: TimeInterval
+    @State private var progress: CGFloat = 0
+
+    var body: some View {
+        ZStack {
+            Circle().stroke(.white.opacity(0.35), lineWidth: 3)
+            Circle()
+                .trim(from: 0, to: progress)
+                .stroke(Color.accentColor, style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                // 12時の位置から時計回りに
+                .rotationEffect(.degrees(-90))
+        }
+        .onAppear {
+            withAnimation(.linear(duration: duration)) { progress = 1 }
+        }
+    }
 }

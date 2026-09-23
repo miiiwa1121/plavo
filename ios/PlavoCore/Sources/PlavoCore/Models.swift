@@ -127,17 +127,6 @@ public struct Plant: Codable, Sendable, Identifiable, Equatable {
     }
 }
 
-/// 日記の1ページ（D14 / D26）。
-///
-/// **1日1ページ。日が変われば自動で増える。**投稿ではなく日誌であり、
-/// 書かなかった日も「お休みした日」としてページが残る。
-/// D18-a で時間の積み重ねを価値の中心に置いた以上、記録しなかった日を
-/// 無かったことにはしない。
-///
-/// 日記は植物ごとではなく**全体で一つ**。植物ごとの記録はマイプラントで見る。
-///
-/// 絵は観察時に撮影した写真を使う。AI生成のイラストは使わない——
-/// 生成された絵は「自分の植物」ではなく、振り返ったときに感情が乗らない。
 /// 日記に貼られた写真1枚（D54）。
 ///
 /// **どの株を撮ったかを写真そのものが持つ。**ページの主役（`DiaryEntry.plantId`）に
@@ -165,28 +154,46 @@ public struct DiaryPhoto: Codable, Sendable, Equatable, Hashable, Identifiable {
     /// 日記のページにも並べない（パラパラとギャラリーに並ぶ）。
     /// 毎日同じ角度で1枚ずつ撮り、パラパラ漫画のように育ちを見るためのもの
     public var flipbook: Bool
+    /// ムービーカメラで撮った3秒の動画か（D58）。`ref` の先は動画の最初の1コマ（静止画）で、
+    /// 動画の実体は PlantStore が別に持つ。
+    ///
+    /// **日記のページには並べない**（パラパラと同じ）。ギャラリーとプロフィールに並ぶ。
+    /// 撮影の3枚にも、日記の10枚にも数えない
+    public var movie: Bool
 
     public var id: String { ref }
 
     /// 両方から外した。もうどこにも並ばないので、実体を手放してよい
     public var isUnused: Bool { removedFromDiary && removedFromGallery }
 
-    /// 日記のページに並ぶか。日記から外したものと、パラパラの写真は並ばない
-    public var isInDiary: Bool { !removedFromDiary && !flipbook }
+    /// 日記のページに並ぶか。日記から外したものと、パラパラの写真・ムービーは並ばない
+    public var isInDiary: Bool { !removedFromDiary && !flipbook && !movie }
 
     public init(
         ref: String, plantId: UUID? = nil, fromCamera: Bool = false, flipbook: Bool = false,
-        removedFromDiary: Bool = false, removedFromGallery: Bool = false
+        movie: Bool = false, removedFromDiary: Bool = false, removedFromGallery: Bool = false
     ) {
         self.ref = ref
         self.plantId = plantId
         self.fromCamera = fromCamera
         self.flipbook = flipbook
+        self.movie = movie
         self.removedFromDiary = removedFromDiary
         self.removedFromGallery = removedFromGallery
     }
 }
 
+/// 日記の1ページ（D14 / D26）。
+///
+/// **1日1ページ。日が変われば自動で増える。**投稿ではなく日誌であり、
+/// 書かなかった日も「お休みした日」としてページが残る。
+/// D18-a で時間の積み重ねを価値の中心に置いた以上、記録しなかった日を
+/// 無かったことにはしない。
+///
+/// 日記は植物ごとではなく**全体で一つ**。植物ごとの記録はマイプラントで見る。
+///
+/// 絵は観察時に撮影した写真を使う。AI生成のイラストは使わない——
+/// 生成された絵は「自分の植物」ではなく、振り返ったときに感情が乗らない。
 public struct DiaryEntry: Codable, Sendable, Identifiable, Equatable {
 
     /// 1日に日記へ載せられる写真の上限。**ページ全体で数える。株では分けない。**
@@ -232,8 +239,9 @@ public struct DiaryEntry: Codable, Sendable, Identifiable, Equatable {
     /// **日記やギャラリーから外した写真も含む。**片方で外しても、もう片方には並ぶため。
     /// ページに並べるのは `diaryPhotos`、ギャラリーに並べるのは `galleryPhotos`
     public var photos: [DiaryPhoto]
+    public let author: Author
 
-    /// ページに並べる写真。日記から外したものと、パラパラの写真を除く
+    /// ページに並べる写真。日記から外したものと、パラパラの写真・ムービーを除く
     public var diaryPhotos: [DiaryPhoto] { photos.filter(\.isInDiary) }
 
     /// ギャラリーに並べる写真。ギャラリーから外したものを除く
@@ -251,10 +259,11 @@ public struct DiaryEntry: Codable, Sendable, Identifiable, Equatable {
 
     /// この日にカメラでその株を撮った枚数。
     /// **日記やギャラリーから外したものも数える。**どこにも並ばなくなったもの（削除）だけを除く。
-    /// パラパラの写真は数えない
+    /// パラパラの写真とムービーは数えない
     public func shotCount(of plantId: UUID) -> Int {
-        photos.filter { $0.fromCamera && !$0.flipbook && $0.plantId == plantId && !$0.isUnused }
-            .count
+        photos.count {
+            $0.fromCamera && !$0.flipbook && !$0.movie && $0.plantId == plantId && !$0.isUnused
+        }
     }
 
     /// この日、その株をもう1枚撮れるか。ページ全体の上限は別に見る（`canAddPhoto`）
@@ -264,14 +273,13 @@ public struct DiaryEntry: Codable, Sendable, Identifiable, Equatable {
 
     /// この日にパラパラカメラでその株を撮った枚数。削除したものだけを除く
     public func flipbookCount(of plantId: UUID) -> Int {
-        photos.filter { $0.flipbook && $0.plantId == plantId && !$0.isUnused }.count
+        photos.count { $0.flipbook && $0.plantId == plantId && !$0.isUnused }
     }
 
     /// この日、その株をパラパラカメラで撮れるか
     public func canShootFlipbook(_ plantId: UUID) -> Bool {
         flipbookCount(of: plantId) < Self.maxFlipbookPerPlantPerDay
     }
-    public let author: Author
 
     /// 何も書かれず、写真も無い日。「お休み」として表示する
     public var isRest: Bool {

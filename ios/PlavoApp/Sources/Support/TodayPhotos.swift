@@ -104,14 +104,11 @@ struct TodayPhotosView: View {
         TabView(selection: $current) {
             ForEach(photos, id: \.ref) { photo in
                 Color.clear
+                    // 写真が変わらない限り作り直さない。下へ引いている間は1コマごとに
+                    // 画面全体が描き直されるので、作り直すとそのたびに全ページの写真を開く
                     .overlay {
-                        if let data = model.store.image(photo.ref),
-                            let image = UIImage(data: data)
-                        {
-                            Image(uiImage: image)
-                                .resizable()
-                                .scaledToFit()
-                        }
+                        DisplayPhoto(ref: photo.ref, model: model, contentMode: .fit, placeholder: .none)
+                            .equatable()
                     }
                     .padding(.horizontal, 12)
                     .tag(photo.ref)

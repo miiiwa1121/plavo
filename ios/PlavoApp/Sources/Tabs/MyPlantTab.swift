@@ -10,8 +10,8 @@ import SwiftUI
 struct MyPlantTab: View {
     @Bindable var model: AppModel
     @State private var path: [UUID] = []
-    /// 起動引数で開いた詳細の、最初のページ（動作確認用）。一覧へ戻ったら 0 に戻す
-    @State private var launchPage = 0
+    /// 起動引数で開いた詳細の、最初のページ（動作確認用）。一覧へ戻ったら記録に戻す
+    @State private var launchPage = PlantDetailPage.records
     /// 起動引数による「詳細を開く」を済ませたか。**1回だけ効かせる。**
     /// 一覧が出るたびに効かせると、詳細から戻った瞬間にまた開き、一覧に戻れない
     @State private var launchHandled = false
@@ -43,11 +43,11 @@ struct MyPlantTab: View {
                     let first = model.store.plants.first?.id
                 else { return }
                 let page = UserDefaults.standard.integer(forKey: "startDetailPage")
-                launchPage = (0...3).contains(page) ? page : 0
+                launchPage = PlantDetailPage(rawValue: page) ?? .records
                 path = [first]
             }
             .onChange(of: path) { _, path in
-                if path.isEmpty { launchPage = 0 }
+                if path.isEmpty { launchPage = .records }
             }
         }
     }
@@ -122,12 +122,6 @@ struct MyPlantTab: View {
     }
 }
 
-/// 切り抜き画面へ渡すための包み
-struct PickedImage: Identifiable {
-    let id = UUID()
-    let image: UIImage
-}
-
 /// 個体のアイコン。
 ///
 /// 写真が設定されていればそれを丸く切り抜き、無ければ生育段階に応じた記号を出す。
@@ -165,6 +159,23 @@ struct PlantAvatar: View {
     }
 }
 
+/// 詳細のページ。**番号は起動引数 `-startDetailPage` の値**（ios/README.md）
+enum PlantDetailPage: Int, CaseIterable, Hashable {
+    case records
+    case growth
+    case photos
+    case flipbook
+
+    var title: String {
+        switch self {
+        case .records: "記録"
+        case .growth: "育成"
+        case .photos: "写真"
+        case .flipbook: "パラパラ"
+        }
+    }
+}
+
 /// 個体の詳細。
 ///
 /// 数値を並べない。何を言っていたか、どこまで育ったかを見せる。
@@ -174,10 +185,8 @@ struct PlantDetailView: View {
 
     @State private var showRemoveConfirm = false
     @State private var avatarItem: PhotosPickerItem?
-    /// 選んだ写真。切り抜き画面に渡す
-    @State private var cropTarget: PickedImage?
-    /// 記録・育成・ギャラリーの行き来。スライドでも切り替わる
-    @State private var page = 0
+    /// 記録・育成・写真・パラパラの行き来。スライドでも切り替わる
+    @State private var page: PlantDetailPage
     /// 上の切り替えの高さ。中身をその下から始めるために測る
     @State private var pickerHeight: CGFloat = 47
     /// ページの中身が、画面の上端からどれだけずれて置かれているか。測って打ち消す
@@ -196,8 +205,8 @@ struct PlantDetailView: View {
 
     private var plant: Plant? { model.store.plant(plantId) }
 
-    /// - Parameter initialPage: 最初に出すページ。ふだんは記録（0）
-    init(model: AppModel, plantId: UUID, initialPage: Int = 0) {
+    /// - Parameter initialPage: 最初に出すページ。ふだんは記録
+    init(model: AppModel, plantId: UUID, initialPage: PlantDetailPage = .records) {
         self.model = model
         self.plantId = plantId
         _page = State(initialValue: initialPage)
@@ -220,25 +229,20 @@ struct PlantDetailView: View {
 
             TabView(selection: $page) {
                 pageContent(records, top: top, bottom: bottom)
-                    .tag(0)
+                    .tag(PlantDetailPage.records)
                 pageContent(GrowthSection(model: model, plantId: plantId), top: top, bottom: bottom)
-                    .tag(1)
+                    .tag(PlantDetailPage.growth)
                 pageContent(gallery, top: top, bottom: bottom)
-                    .tag(2)
+                    .tag(PlantDetailPage.photos)
                 pageContent(flipbook, top: top, bottom: bottom)
-                    .tag(3)
+                    .tag(PlantDetailPage.flipbook)
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
             .ignoresSafeArea()
             .overlay(alignment: .top) {
                 CapsuleTabBar(
                     selection: $page,
-                    items: [
-                        .init(0, title: "記録"),
-                        .init(1, title: "育成"),
-                        .init(2, title: "写真"),
-                        .init(3, title: "パラパラ"),
-                    ],
+                    items: PlantDetailPage.allCases.map { .init($0, title: $0.title) },
                     itemWidth: 78
                 )
                 .padding(.bottom, 8)
@@ -273,23 +277,8 @@ struct PlantDetailView: View {
             GalleryStripView(plantId: plantId, kind: .flipbook, current: $flipbookFocus, model: model)
                 .navigationTransition(.zoom(sourceID: flipbookFocus, in: flipbookZoom))
         }
-        .onChange(of: avatarItem) { _, item in
-            guard let item else { return }
-            Task {
-                guard let data = try? await item.loadTransferable(type: Data.self),
-                    let image = UIImage(data: data)
-                else { return }
-                await MainActor.run {
-                    // そのまま丸く切ると狙った場所が入らない。範囲を選ばせる
-                    cropTarget = PickedImage(image: image)
-                    avatarItem = nil
-                }
-            }
-        }
-        .sheet(item: $cropTarget) { picked in
-            AvatarCropView(image: picked.image) { data in
-                model.store.setAvatar(data, for: plantId)
-            }
+        .avatarPicking($avatarItem) { data in
+            model.store.setAvatar(data, for: plantId)
         }
         .confirmationDialog(
             "本当に削除しますか", isPresented: $showRemoveConfirm, titleVisibility: .visible
@@ -370,7 +359,7 @@ struct PlantDetailView: View {
 
                 Section {
                     LabeledContent("種類", value: plant.species)
-                    LabeledContent("出会った日", value: format(plant.plantedAt))
+                    LabeledContent("出会った日", value: DateLabel.monthDay(plant.plantedAt))
                     let withered = model.store.stage(of: plantId) == .withered
                     LabeledContent(
                         withered ? "共に過ごした日数" : "一緒にいる日数",
@@ -416,7 +405,7 @@ struct PlantDetailView: View {
                     Section("観察の履歴") {
                         ForEach(Array(history.enumerated()), id: \.offset) { _, o in
                             VStack(alignment: .leading, spacing: 3) {
-                                Text(format(o.observedAt))
+                                Text(DateLabel.monthDay(o.observedAt))
                                     .font(.caption).foregroundStyle(.secondary)
                                 if !o.dialogue.isEmpty {
                                     Text("「\(o.dialogue)」").font(.callout)
@@ -540,19 +529,16 @@ struct PlantDetailView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
+    /// その段階まで来たことがあるか。
+    ///
+    /// **いまの段階ではなく、到達したいちばん先で見る。**いまの段階は見送った株では枯死になり、
+    /// 枯死は歩みの並び（`GrowthStage.order`）に無いので、咲いた株でも印が1つも付かなかった
     private func reached(_ stage: GrowthStage) -> Bool {
-        guard let current = model.store.stage(of: plantId),
-            let currentIndex = GrowthStage.order.firstIndex(of: current),
+        guard let furthest = model.store.furthestStage(of: plantId),
+            let furthestIndex = GrowthStage.order.firstIndex(of: furthest),
             let index = GrowthStage.order.firstIndex(of: stage)
         else { return false }
-        return index <= currentIndex
-    }
-
-    private func format(_ date: Date) -> String {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "ja_JP")
-        f.dateFormat = "M月d日"
-        return f.string(from: date)
+        return index <= furthestIndex
     }
 }
 

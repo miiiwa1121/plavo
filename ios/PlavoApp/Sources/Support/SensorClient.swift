@@ -45,8 +45,12 @@ final class SensorClient {
     private var consecutiveFailures = 0
     private var task: Task<Void, Never>?
 
+    /// 展示で使う PC のアドレス（テザリングで割り当てられるもの）
+    private static let defaultBaseURL = "http://192.168.11.2:8787"
+    private static let decoder = JSONDecoder()
+
     init() {
-        baseURL = UserDefaults.standard.string(forKey: Self.baseURLKey) ?? "http://192.168.11.2:8787"
+        baseURL = UserDefaults.standard.string(forKey: Self.baseURLKey) ?? Self.defaultBaseURL
     }
 
     // MARK: - 取得の開始と停止
@@ -72,8 +76,20 @@ final class SensorClient {
         state = .idle
     }
 
+    /// 最新の1点を取りにいく先。**http / https でホストがあるときだけ。**
+    ///
+    /// 文字列をそのまま繋ぐと、末尾に「/」を付けて入れたときに `//sensor/latest` になり、
+    /// 別のパスとして扱われた。`file://` のような先も通っていた
+    private var latestURL: URL? {
+        guard let base = URL(string: baseURL.trimmingCharacters(in: .whitespaces)),
+            let scheme = base.scheme?.lowercased(), ["http", "https"].contains(scheme),
+            base.host() != nil
+        else { return nil }
+        return base.appending(path: "sensor/latest")
+    }
+
     private func poll(onReading: (SensorPayload) -> Void) async {
-        guard let url = URL(string: "\(baseURL)/sensor/latest") else {
+        guard let url = latestURL else {
             state = .failed("アドレスが不正")
             return
         }
@@ -96,7 +112,7 @@ final class SensorClient {
                 throw URLError(.badServerResponse)
             }
 
-            let payload = try JSONDecoder().decode(SensorPayload.self, from: data)
+            let payload = try Self.decoder.decode(SensorPayload.self, from: data)
             lastPayload = payload
             receivedCount += 1
             consecutiveFailures = 0

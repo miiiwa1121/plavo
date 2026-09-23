@@ -30,6 +30,12 @@ final class PlantStore {
     /// 写真の実体。参照名から引く。
     /// D36 により永続化しないため、メモリに置く。リセットで消える。
     private(set) var images: [String: Data] = [:]
+    /// ムービーの実体（D58）。写真の参照名から引く。
+    ///
+    /// **動画は書き出したファイルのまま持つ。**再生（AVPlayer）はファイルから読むので、
+    /// メモリに載せ直さない。`images` には同じ参照名で最初の1コマを置き、一覧はそれを出す。
+    /// 写真と同じく永続化しない（D36）。手放すときにファイルも消す
+    private(set) var movies: [String: URL] = [:]
 
     /// 仕込みの株。展示中ずっと残る。
     ///
@@ -42,10 +48,24 @@ final class PlantStore {
     private(set) var seededPlantIds: Set<UUID> = []
     /// 仕込みの仮の写真（D47）。「直近の1枚」（D42）には出さない
     private var seededPhotoRefs: Set<String> = []
+    /// 仕込みの筋書きと計測値。リセットのたびに組み直すために持つ
+    private var seedPlans: [(plan: SeedPlan, growth: GrowthRecordFile)] = []
 
     /// 小さい絵の置き場。**観察の対象にしない**——
     /// 覚え直しは見た目を変えないので、画面を描き直す理由にならない
     @ObservationIgnored private let thumbnails = ThumbnailCache()
+
+    /// 画面の幅いっぱいに出す1枚（日記のカード・ギャラリーのメイン・全画面・直近の写真）。
+    /// 覚えるのは十数枚まで。1枚が 7MB ほどあるので、小さい絵とは置き場を分ける
+    @ObservationIgnored private let displayImages = ThumbnailCache(
+        countLimit: 12, totalCostLimit: 96 * 1024 * 1024)
+
+    /// 画面いっぱいに出す1枚の長辺（ピクセル）。
+    ///
+    /// **元の大きさでは開かない。**本体カメラの1枚は 12MP あり、描き直しのたびに開くと
+    /// 日記の本文を1文字打つだけで引っかかる。縦長の写真で画面の幅（〜1,300px）を
+    /// 埋めても足りる大きさにしてある
+    static let displayMaxPixel: CGFloat = 1600
 
     /// 選択中の株。カメラで観察した結果はここに積まれる
     var selectedPlantId: UUID?
@@ -116,46 +136,31 @@ final class PlantStore {
             // 1枚目から「2/10」になる。筋書き側でも昨日までに収めてある
             guard !Calendar.current.isDateInToday(date) else { continue }
             let stage = plan.stage(upTo: day)
-            let shots = plan.shots[day] ?? 1
-            if let text = plan.milestoneText[day] {
-                addToDay(
-                    DiaryEntry(
-                        plantId: plant.id,
-                        date: date,
-                        stage: stage,
-                        dayLabel: "\(day)日目",
-                        text: text,
-                        quotedDialogue: plan.dialogue[day],
-                        photos: seedPhotos(
+            // 段階の変わり目は観察から自動で綴られ、その子の言葉を引く。
+            // 変わり目ではないが何か書いた日は本人の日記。どちらでもなければお休みした日
+            let written: (text: String, author: DiaryEntry.Author, quote: String?)? =
+                if let text = plan.milestoneText[day] {
+                    (text, .auto, plan.dialogue[day])
+                } else if let text = plan.ordinary[day] {
+                    (text, .user, nil)
+                } else {
+                    nil
+                }
+            addToDay(
+                DiaryEntry(
+                    plantId: plant.id,
+                    date: date,
+                    stage: stage,
+                    dayLabel: "\(day)日目",
+                    text: written?.text ?? "",
+                    quotedDialogue: written?.quote,
+                    photos: written == nil
+                        ? []
+                        : seedPhotos(
                             day: day, stage: stage,
-                            thirsty: plan.thirstyDays.contains(day), shots: shots,
+                            thirsty: plan.thirstyDays.contains(day), shots: plan.shots[day] ?? 1,
                             look: plan.look, of: plant.id),
-                        author: .auto))
-            } else if let ordinary = plan.ordinary[day] {
-                // 段階の変わり目ではないが、何か書いた日
-                addToDay(
-                    DiaryEntry(
-                        plantId: plant.id,
-                        date: date,
-                        stage: stage,
-                        dayLabel: "\(day)日目",
-                        text: ordinary,
-                        photos: seedPhotos(
-                            day: day, stage: stage,
-                            thirsty: plan.thirstyDays.contains(day), shots: shots,
-                            look: plan.look, of: plant.id),
-                        author: .user))
-            } else {
-                // お休みした日
-                addToDay(
-                    DiaryEntry(
-                        plantId: plant.id,
-                        date: date,
-                        stage: stage,
-                        dayLabel: "\(day)日目",
-                        text: "",
-                        author: .user))
-            }
+                    author: written?.author ?? .user))
         }
         seedFlipbook(plan, plantId: plant.id, plantedAt: plantedAt)
         diary.sort { $0.date > $1.date }
@@ -234,9 +239,8 @@ final class PlantStore {
         of plantId: UUID
     ) -> [DiaryPhoto] {
         (0..<max(1, shots)).map { shot in
-            let ref = UUID().uuidString
-            images[ref] = PlaceholderPhotos.jpeg(
-                day: day, stage: stage, thirsty: thirsty, shot: shot, look: look)
+            let ref = storeImage(
+                PlaceholderPhotos.jpeg(day: day, stage: stage, thirsty: thirsty, shot: shot, look: look))
             seededPhotoRefs.insert(ref)
             return DiaryPhoto(ref: ref, plantId: plantId)
         }
@@ -255,31 +259,38 @@ final class PlantStore {
     }
 
     func rename(_ plantId: UUID, to name: String) {
-        guard let i = plants.firstIndex(where: { $0.id == plantId }) else { return }
-        plants[i].name = name
+        updatePlant(plantId) { $0.name = name }
     }
 
     /// アイコンの写真を差し替える。前のものは捨てる
     func setAvatar(_ data: Data, for plantId: UUID) {
-        guard let i = plants.firstIndex(where: { $0.id == plantId }) else { return }
-        if let old = plants[i].avatarRef { images[old] = nil }
-        let ref = UUID().uuidString
-        images[ref] = data
-        plants[i].avatarRef = ref
+        updatePlant(plantId) { $0.avatarRef = storeImage(data, replacing: $0.avatarRef) }
     }
 
     /// 自分のアイコンを差し替える。前の画像は手放す
     func setUserAvatar(_ data: Data) {
-        if let old = userAvatarRef { images[old] = nil }
-        let ref = UUID().uuidString
-        images[ref] = data
-        userAvatarRef = ref
+        userAvatarRef = storeImage(data, replacing: userAvatarRef)
     }
 
     func removeAvatar(_ plantId: UUID) {
+        updatePlant(plantId) { plant in
+            if let old = plant.avatarRef { images[old] = nil }
+            plant.avatarRef = nil
+        }
+    }
+
+    /// その株を書き換える。見つからなければ何もしない
+    private func updatePlant(_ plantId: UUID, _ change: (inout Plant) -> Void) {
         guard let i = plants.firstIndex(where: { $0.id == plantId }) else { return }
-        if let old = plants[i].avatarRef { images[old] = nil }
-        plants[i].avatarRef = nil
+        change(&plants[i])
+    }
+
+    /// 画像を置いて、参照を返す。前の画像を渡せば手放す（アイコンの差し替え）
+    private func storeImage(_ data: Data, replacing old: String? = nil) -> String {
+        if let old { images[old] = nil }
+        let ref = UUID().uuidString
+        images[ref] = data
+        return ref
     }
 
     // MARK: - ガジェットとの紐づけ（D39）
@@ -294,8 +305,7 @@ final class PlantStore {
         for i in plants.indices where plants[i].gadgetId == gadgetId {
             plants[i].gadgetId = nil
         }
-        guard let i = plants.firstIndex(where: { $0.id == plantId }) else { return }
-        plants[i].gadgetId = gadgetId
+        updatePlant(plantId) { $0.gadgetId = gadgetId }
     }
 
     /// センサーから値が届いたときに、どの株かを決める。
@@ -313,8 +323,7 @@ final class PlantStore {
     }
 
     func updateSpecies(_ plantId: UUID, to species: String) {
-        guard let i = plants.firstIndex(where: { $0.id == plantId }) else { return }
-        plants[i].species = species
+        updatePlant(plantId) { $0.species = species }
     }
 
     // MARK: - 削除（D29）
@@ -334,12 +343,12 @@ final class PlantStore {
         // その株の写真は、どのページからも抜く（D54）。
         // 同じ日に別の株を撮っていると、1ページに混ざっている
         for i in diary.indices {
-            for photo in diary[i].photos where photo.plantId == plantId { images[photo.ref] = nil }
+            for photo in diary[i].photos where photo.plantId == plantId { releasePhoto(photo.ref) }
             diary[i].photos.removeAll { $0.plantId == plantId }
         }
         // 主役だったページごと消す。残っている写真の実体も捨てる
         for entry in diary where entry.plantId == plantId {
-            for photo in entry.photos { images[photo.ref] = nil }
+            for photo in entry.photos { releasePhoto(photo.ref) }
         }
         diary.removeAll { $0.plantId == plantId }
         if selectedPlantId == plantId { selectedPlantId = nil }
@@ -355,7 +364,7 @@ final class PlantStore {
     func recordMeasurement(_ value: Double, metric: MetricID, for plantId: UUID, at date: Date = Date()) {
         var bucketer =
             bucketers[plantId]?[metric]
-            ?? MetricBucketer(interval: MetricCatalog.definition(metric)?.interval ?? 600)
+            ?? MetricBucketer(interval: MetricCatalog.definition(metric)?.interval ?? MetricCatalog.sensorInterval)
         let confirmed = bucketer.add(value, at: date)
         bucketers[plantId, default: [:]][metric] = bucketer
         if confirmed, let series = bucketer.series {
@@ -375,7 +384,7 @@ final class PlantStore {
 
     func removeDiary(_ id: UUID) {
         if let entry = diary.first(where: { $0.id == id }) {
-            for photo in entry.photos { images[photo.ref] = nil }
+            for photo in entry.photos { releasePhoto(photo.ref) }
         }
         diary.removeAll { $0.id == id }
     }
@@ -459,9 +468,8 @@ final class PlantStore {
         guard let i = diary.firstIndex(where: { $0.id == id }) else { return false }
         guard diary[i].canAddPhoto else { return false }
         if fromCamera, let plantId, !diary[i].canShoot(plantId) { return false }
-        let ref = UUID().uuidString
-        images[ref] = data
-        diary[i].photos.append(DiaryPhoto(ref: ref, plantId: plantId, fromCamera: fromCamera))
+        diary[i].photos.append(
+            DiaryPhoto(ref: storeImage(data), plantId: plantId, fromCamera: fromCamera))
         return true
     }
 
@@ -471,12 +479,24 @@ final class PlantStore {
     func addFlipbookPhoto(_ data: Data, to id: UUID, of plantId: UUID) -> Bool {
         guard let i = diary.firstIndex(where: { $0.id == id }), diary[i].canShootFlipbook(plantId)
         else { return false }
-        let ref = UUID().uuidString
-        images[ref] = data
         diary[i].photos.append(
-            DiaryPhoto(ref: ref, plantId: plantId, fromCamera: true, flipbook: true))
+            DiaryPhoto(ref: storeImage(data), plantId: plantId, fromCamera: true, flipbook: true))
         return true
     }
+
+    /// ムービーを足す（D58）。`poster` は最初の1コマ。**枠は設けない。**撮影の3枚にも日記の10枚にも数えない。
+    /// ページが見つからなければ false（動画のファイルは呼んだ側が始末する）
+    @discardableResult
+    func addMovie(_ url: URL, poster: Data, to id: UUID, of plantId: UUID) -> Bool {
+        guard let i = diary.firstIndex(where: { $0.id == id }) else { return false }
+        let ref = storeImage(poster)
+        movies[ref] = url
+        diary[i].photos.append(DiaryPhoto(ref: ref, plantId: plantId, fromCamera: true, movie: true))
+        return true
+    }
+
+    /// その写真がムービーなら、動画のファイル
+    func movieURL(_ ref: String) -> URL? { movies[ref] }
 
     /// 日記のページから外す。**ギャラリーには残す**
     func removeFromDiary(_ ref: String, in id: UUID) {
@@ -502,9 +522,7 @@ final class PlantStore {
     /// ギャラリーから外す。**日記には残す。**
     /// ギャラリーはページを知らずに写真だけを持つので、写真からページを探す
     func removeFromGallery(_ ref: String) {
-        guard let i = diary.firstIndex(where: { $0.photos.contains { $0.ref == ref } }),
-            let j = diary[i].photos.firstIndex(where: { $0.ref == ref })
-        else { return }
+        guard let (i, j) = locatePhoto(ref) else { return }
         diary[i].photos[j].removedFromGallery = true
         forgetIfUnused(i, j)
     }
@@ -514,12 +532,18 @@ final class PlantStore {
     /// 直近の写真（D42-a）で、撮り損ねた1枚を捨てるための操作。
     /// その株の撮影の枠（1株3枚・D54）が1つ戻る
     func deletePhoto(_ ref: String) {
-        guard let i = diary.firstIndex(where: { $0.photos.contains { $0.ref == ref } }),
-            let j = diary[i].photos.firstIndex(where: { $0.ref == ref })
-        else { return }
+        guard let (i, j) = locatePhoto(ref) else { return }
         diary[i].photos[j].removedFromDiary = true
         diary[i].photos[j].removedFromGallery = true
         forgetIfUnused(i, j)
+    }
+
+    /// 写真の居場所（何ページ目の何枚目か）。ギャラリーはページを知らずに写真だけを持つので、写真から探す
+    private func locatePhoto(_ ref: String) -> (page: Int, photo: Int)? {
+        for (i, entry) in diary.enumerated() {
+            if let j = entry.photos.firstIndex(where: { $0.ref == ref }) { return (i, j) }
+        }
+        return nil
     }
 
     /// 日記からもギャラリーからも外れた写真は、実体ごと手放す。
@@ -528,11 +552,15 @@ final class PlantStore {
         let photo = diary[i].photos[j]
         guard photo.isUnused else { return }
         diary[i].photos.remove(at: j)
-        images[photo.ref] = nil
+        releasePhoto(photo.ref)
         seededPhotoRefs.remove(photo.ref)
     }
 
-    func image(_ ref: String) -> Data? { images[ref] }
+    /// 写真の実体を手放す。**ムービーなら動画のファイルも消す**
+    private func releasePhoto(_ ref: String) {
+        images[ref] = nil
+        if let url = movies.removeValue(forKey: ref) { try? FileManager.default.removeItem(at: url) }
+    }
 
     /// グリッドや列に出す小さい絵。
     ///
@@ -543,17 +571,36 @@ final class PlantStore {
         thumbnails.image(for: ref, maxPixel: maxPixel, data: images[ref])
     }
 
+    /// 画面の幅いっぱいに出す1枚（`displayMaxPixel` まで縮めて開く）。
+    ///
+    /// **描き直しのたびに元の写真を開き直さない。**`UIImage(data:)` をビューの中で呼ぶと、
+    /// 状態が変わるたびに新しい画像になり、描くたびに 12MP を展開し直していた
+    func displayImage(_ ref: String) -> UIImage? {
+        displayImages.image(for: ref, maxPixel: Self.displayMaxPixel, data: images[ref])
+    }
+
     /// 小さい絵を、**裏で**作って覚える。
     ///
     /// 2本指で列を変えている最中に、初めて見えたマスをその場で開くと引っかかる。
     /// 先に裏で開いておき、描くときには覚えているものを出すだけにする
     func thumbnailInBackground(_ ref: String, maxPixel: CGFloat = 400) async -> UIImage? {
-        if let hit = thumbnails.cached(ref, maxPixel: maxPixel) { return hit }
+        await loadInBackground(ref, maxPixel: maxPixel, into: thumbnails)
+    }
+
+    /// 画面いっぱいに出す1枚を、**裏で**開いて覚える（`prefetchingNeighbors`）。
+    /// 送った先でその場で開くと、1枚ごとに引っかかる
+    func prepareDisplayImage(_ ref: String) async {
+        _ = await loadInBackground(ref, maxPixel: Self.displayMaxPixel, into: displayImages)
+    }
+
+    /// 縮めて開くのは裏で、覚えるのは画面の仕事の中で
+    private func loadInBackground(_ ref: String, maxPixel: CGFloat, into cache: ThumbnailCache) async -> UIImage? {
+        if let hit = cache.cached(ref, maxPixel: maxPixel) { return hit }
         guard let data = images[ref] else { return nil }
         let made = await Task.detached(priority: .userInitiated) {
             ThumbnailCache.downsample(data, maxPixel: maxPixel)
         }.value
-        if let made { thumbnails.remember(made, for: ref, maxPixel: maxPixel) }
+        if let made { cache.remember(made, for: ref, maxPixel: maxPixel) }
         return made
     }
 
@@ -569,10 +616,7 @@ final class PlantStore {
         return
             entry.photos
             .filter { !seededPhotoRefs.contains($0.ref) }
-            .map {
-                PlantPhoto(
-                    ref: $0.ref, date: entry.date, dayLabel: entry.dayLabel, plantId: $0.plantId)
-            }
+            .map { PlantPhoto($0, in: entry) }
     }
 
     /// 直近に撮った1枚（D42）。カメラの左下に出す。
@@ -584,6 +628,34 @@ final class PlantStore {
     /// **仕込みの仮の写真は含めない**（D47）。含めると、まだ1枚も撮っていないのに
     /// ひまりの写真が出てしまう（D42 では何も出さない）
     var latestPhotoRef: String? { todayPhotos.last?.ref }
+
+    /// すべての写真を、新しい順に。**株で分けない**（プロフィール）。
+    /// 並べ方は株ごとのギャラリー（`photos(of:)`）と同じ。ギャラリーから外した写真は並ばない
+    var allPhotos: [PlantPhoto] {
+        diary.flatMap { entry in
+            entry.galleryPhotos.reversed().map { PlantPhoto($0, in: entry) }
+        }
+    }
+
+    /// その株のパラパラの写真を、新しい順に。
+    ///
+    /// **ギャラリーから外していても並べる。**ギャラリーは撮ったものの全部、
+    /// パラパラは毎日の1枚。片方で外しても、もう片方は欠けさせない
+    func flipbookPhotos(of plantId: UUID) -> [PlantPhoto] {
+        diary.flatMap { entry in
+            entry.photos.reversed()
+                .filter { $0.flipbook && $0.plantId == plantId && !$0.isUnused }
+                .map { PlantPhoto($0, in: entry) }
+        }
+    }
+
+    /// その株の、いちばん新しいパラパラの1枚。パラパラカメラで薄く重ねる
+    func latestFlipbookRef(of plantId: UUID) -> String? {
+        flipbookPhotos(of: plantId).first?.ref
+    }
+
+    /// 日記を書いた日の数。**お休みの日（本文も写真も無い日）は数えない**
+    var diaryPostCount: Int { diary.filter { !$0.isRest }.count }
 
     /// その株の写真を、新しい順に集める。
     ///
@@ -598,48 +670,11 @@ final class PlantStore {
     /// ページの主役で絞ると、もう一方の株の写真まで連れてきてしまう。
     ///
     /// ギャラリーから外した写真は除く。日記から外した写真は含める。
-    /// すべての写真を、新しい順に。**株で分けない**（プロフィール）。
-    /// 並べ方は株ごとのギャラリー（`photos(of:)`）と同じ。ギャラリーから外した写真は並ばない
-    var allPhotos: [PlantPhoto] {
-        diary.flatMap { entry in
-            entry.galleryPhotos.reversed().map {
-                PlantPhoto(
-                    ref: $0.ref, date: entry.date, dayLabel: entry.dayLabel, plantId: $0.plantId)
-            }
-        }
-    }
-
-    /// その株のパラパラの写真を、新しい順に。
-    ///
-    /// **ギャラリーから外していても並べる。**ギャラリーは撮ったものの全部、
-    /// パラパラは毎日の1枚。片方で外しても、もう片方は欠けさせない
-    func flipbookPhotos(of plantId: UUID) -> [PlantPhoto] {
-        diary.flatMap { entry in
-            entry.photos.reversed()
-                .filter { $0.flipbook && $0.plantId == plantId && !$0.isUnused }
-                .map {
-                    PlantPhoto(
-                        ref: $0.ref, date: entry.date, dayLabel: entry.dayLabel, plantId: $0.plantId)
-                }
-        }
-    }
-
-    /// その株の、いちばん新しいパラパラの1枚。パラパラカメラで薄く重ねる
-    func latestFlipbookRef(of plantId: UUID) -> String? {
-        flipbookPhotos(of: plantId).first?.ref
-    }
-
-    /// 日記を書いた日の数。**お休みの日（本文も写真も無い日）は数えない**
-    var diaryPostCount: Int { diary.filter { !$0.isRest }.count }
-
     func photos(of plantId: UUID) -> [PlantPhoto] {
         diary.flatMap { entry in
             entry.galleryPhotos.reversed()
                 .filter { $0.plantId == plantId }
-                .map {
-                    PlantPhoto(
-                        ref: $0.ref, date: entry.date, dayLabel: entry.dayLabel, plantId: $0.plantId)
-                }
+                .map { PlantPhoto($0, in: entry) }
         }
     }
 
@@ -696,6 +731,11 @@ final class PlantStore {
         Metrics.currentStage(observations(of: plantId))
     }
 
+    /// これまでに到達したいちばん先の段階。**見送った株でも、咲いたことは消えない**
+    func furthestStage(of plantId: UUID) -> GrowthStage? {
+        Metrics.furthestStage(observations(of: plantId))
+    }
+
     // MARK: - 統計（プロフィール）
 
     /// 育てている植物。枯れたものは数えない
@@ -716,8 +756,6 @@ final class PlantStore {
     // MARK: - リセット（D33）
 
     /// 次の来場者のために、この回の追加を消す。
-    /// 仕込みの株は残す。毎回同じ状態から始まる再現性のため。
-    /// 次の来場者のために、この回の追加を消す。
     ///
     /// **仕込みも含めて作り直す。**来場者が仕込みの日記を書き換えている
     /// 可能性があるため、差分を取り除くだけでは元に戻らない。
@@ -726,11 +764,14 @@ final class PlantStore {
         observations.removeAll()
         diary.removeAll()
         images.removeAll()
+        for url in movies.values { try? FileManager.default.removeItem(at: url) }
+        movies.removeAll()
         growth.removeAll()
         bucketers.removeAll()
         seededPlantIds.removeAll()
         seededPhotoRefs.removeAll()
         thumbnails.removeAll()
+        displayImages.removeAll()
         // 未選択に戻す。次の来場者も「はじめまして」から始まる
         selectedPlantId = nil
         // 名前とアイコンも来場者のもの。仮に戻す
@@ -739,10 +780,6 @@ final class PlantStore {
         // 仕込みの株は組み直す。筋書きは持ったままなので読み込みは要らない
         for entry in seedPlans { build(entry.plan, growth: entry.growth) }
     }
-
-    /// 作り直すために、仕込みの元を覚えておく
-    /// 仕込みの筋書きと計測値。リセットのたびに組み直すために持つ
-    private var seedPlans: [(plan: SeedPlan, growth: GrowthRecordFile)] = []
 }
 
 /// ギャラリーに並べる1枚。写真の実体は持たず、どの日のページのものかだけを添える
@@ -754,4 +791,15 @@ struct PlantPhoto: Hashable {
     let dayLabel: String?
     /// 撮った相手（D54）。株をまたいで並べる場面で、どの子かを言うために持つ
     var plantId: UUID?
+    /// ムービーか（D58）。一覧で印を付け、プロフィールの「写真」「動画」で分ける
+    var movie = false
+}
+
+extension PlantPhoto {
+    /// そのページに載っている1枚として
+    init(_ photo: DiaryPhoto, in entry: DiaryEntry) {
+        self.init(
+            ref: photo.ref, date: entry.date, dayLabel: entry.dayLabel, plantId: photo.plantId,
+            movie: photo.movie)
+    }
 }

@@ -163,7 +163,7 @@ private struct DiaryTile: View {
                 // 日記は全体で一つなので、株ごとの「N日目」ではなく日付を出す。
                 // 複数の株が混ざったとき、「1日目」の隣に「78日目」が並ぶと
                 // 何の日数なのか分からなくなる。
-                Text(Self.shortDate(entry.date))
+                Text(DateLabel.shortMonthDay(entry.date))
                     .font(.caption2.weight(.semibold))
                     // 空の今日は背景が明るいので、白文字では読めない
                     .foregroundStyle(
@@ -191,12 +191,24 @@ private struct DiaryTile: View {
     }
 
     private var fallback: some View {
+        StageArtwork(stage: entry.stage, symbolSize: 26)
+    }
+}
+
+/// 写真の無い日を、生育段階の色と記号で埋める。マスでもカードでも同じ絵を使う。
+///
+/// **段階の移り変わりがグリッド上で見えることに意味がある**——一生の流れが色で伝わる。
+private struct StageArtwork: View {
+    let stage: GrowthStage?
+    let symbolSize: CGFloat
+
+    var body: some View {
         ZStack {
             LinearGradient(
-                colors: [Self.tint(entry.stage), Self.tint(entry.stage).opacity(0.65)],
+                colors: [Self.tint(stage), Self.tint(stage).opacity(0.65)],
                 startPoint: .topLeading, endPoint: .bottomTrailing)
-            Image(systemName: Self.symbol(entry.stage))
-                .font(.system(size: 26))
+            Image(systemName: Self.symbol(stage))
+                .font(.system(size: symbolSize))
                 .foregroundStyle(.white.opacity(0.9))
         }
     }
@@ -214,14 +226,6 @@ private struct DiaryTile: View {
         case .withered: Color(red: 0.52, green: 0.46, blue: 0.40)
         case nil: Color.gray
         }
-    }
-
-    /// タイルは狭いので短く出す
-    static func shortDate(_ date: Date) -> String {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "ja_JP")
-        f.dateFormat = "M/d"
-        return f.string(from: date)
     }
 
     static func symbol(_ stage: GrowthStage?) -> String {
@@ -356,7 +360,7 @@ private struct DiaryCard: View {
         HStack(spacing: 8) {
             // **日付だけを出す。**「N日目」や段階は株ごとのもので、
             // 株で分けない1日1ページの見出しには合わない
-            Text(format(entry.date))
+            Text(DateLabel.monthDay(entry.date))
                 .font(.caption.weight(.semibold))
             Spacer()
 
@@ -478,9 +482,11 @@ private struct DiaryCard: View {
         .padding(.horizontal, -Self.padding)
     }
 
+    /// **画面に出す大きさに縮めた絵を使う**（`PlantStore.displayImage`）。
+    /// 本文を1文字打つたびにカードが描き直されるので、元の写真を開くとそのたびに引っかかる
     @ViewBuilder
     private func photo(_ ref: String) -> some View {
-        if let data = model.store.image(ref), let image = UIImage(data: data) {
+        if let image = model.store.displayImage(ref) {
             Image(uiImage: image).resizable().scaledToFill()
         } else {
             Rectangle().fill(.quaternary)
@@ -613,18 +619,9 @@ private struct DiaryCard: View {
 
     /// 写真が無いときは生育段階の色で埋める
     private func placeholder(_ entry: DiaryEntry) -> some View {
-        ZStack {
-            LinearGradient(
-                colors: [
-                    DiaryTile.tint(entry.stage), DiaryTile.tint(entry.stage).opacity(0.65),
-                ],
-                startPoint: .topLeading, endPoint: .bottomTrailing)
-            Image(systemName: DiaryTile.symbol(entry.stage))
-                .font(.system(size: 44))
-                .foregroundStyle(.white.opacity(0.9))
-        }
-        .frame(height: 240)
-        .clipShape(RoundedRectangle(cornerRadius: 10))
+        StageArtwork(stage: entry.stage, symbolSize: 44)
+            .frame(height: Self.photoHeight)
+            .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 
     // MARK: - 本文
@@ -634,7 +631,7 @@ private struct DiaryCard: View {
         TextField(
             "今日のことを書く",
             text: Binding(
-                get: { model.store.diary.first { $0.id == entryId }?.text ?? "" },
+                get: { self.entry?.text ?? "" },
                 set: { model.store.updateText(entryId, to: $0) }
             ),
             axis: .vertical
@@ -661,20 +658,18 @@ private struct DiaryCard: View {
     private func load(_ item: PhotosPickerItem?) {
         guard let item else { return }
         Task {
-            guard let data = try? await item.loadTransferable(type: Data.self) else { return }
-            await MainActor.run {
+            // **読めても読めなくても選択を外す。**残すと、同じ写真を選び直しても
+            // 変化が起きず、二度と読み直せない
+            defer { pickerItem = nil }
+            // 選んでいる間に上限へ届いていれば足せない。足せたときだけ受け取った手応えを返す
+            guard let data = await item.loadData(),
                 model.store.addPhoto(data, to: entryId, of: entry?.plantId)
-                Haptics.tap()
-                pickerItem = nil
+            else {
+                Haptics.caution()
+                return
             }
+            Haptics.tap()
         }
-    }
-
-    private func format(_ date: Date) -> String {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "ja_JP")
-        f.dateFormat = "M月d日"
-        return f.string(from: date)
     }
 }
 

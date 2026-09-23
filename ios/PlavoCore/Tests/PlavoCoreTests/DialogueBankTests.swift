@@ -54,6 +54,23 @@ final class DialogueBankTests: XCTestCase {
         }
     }
 
+    func testRejectsReversedRange() throws {
+        // 手で書くファイルなので、上下を取り違えることがある。落ちずに、どこが悪いかを返す
+        let moisture = Data(
+            #"{"id":"moisture","bands":[{"key":"thirsty","label":"渇き","range":[30,15],"lines":["…"]}]}"#.utf8)
+        let lines = Data(#"{"id":"greeting","lines":["やあ"]}"#.utf8)
+        let empty = Data(#"{"id":"x","bands":[]}"#.utf8)
+        let timeline = Data(#"{"id":"timeline","panels":[]}"#.utf8)
+        XCTAssertThrowsError(
+            try DialogueBank(
+                greetingData: lines, moistureData: moisture, lightData: empty,
+                environmentData: empty, growthData: empty, timelineData: timeline)
+        ) { error in
+            XCTAssertEqual(
+                error as? DialogueBank.LoadError, .invalidRange(bandKey: "thirsty", range: [30, 15]))
+        }
+    }
+
     // MARK: - 帯域の決定
 
     func testMoistureBandBoundaries() throws {

@@ -11,6 +11,7 @@ import PlavoCore
 final class AppModel {
 
     private(set) var bank: DialogueBank?
+    /// 読み込めなかったもの。設定画面に出す。**1つ読めなくても、読めたものでアプリは動かす**
     private(set) var loadError: String?
 
     /// 直前のセリフを避けるために状態を持つ。リセット時に一緒にクリアする
@@ -45,41 +46,67 @@ final class AppModel {
     private(set) var consecutiveWatering = false
     private var lastMoisture: Double = initialSoilMoisture
 
-    init() {
-        do {
-            let loaded = try Self.loadBank()
-            bank = loaded
-            // すでに育ててきた株を用意する（L-12 / D53）。
-            // 展示では記録が積み上がる時間がないため、あらかじめ仕込む。
-            //
-            // **2株。**ひまりは一生を終えた株（時系列パネルと一致する）、
-            // こすもは3ヶ月目の生きている株。ひまりだけだと
-            // 「迎え入れた株がいない」状態に見えていた（D52）
-            if let himari = SeedPlan.himari(from: loaded, profile: profile) {
-                store.seed(himari, growth: try Self.loadGrowth(himari.growthFile))
-            }
-            store.seed(SeedPlan.kosumo, growth: try Self.loadGrowth(SeedPlan.kosumo.growthFile))
+    /// すでに湿っているとみなす土壌水分（%）。**ここからさらに水が入ったときだけ過湿とみなす**
+    private static let alreadyMoistFloor: Double = 55
 
-            // 起動引数で株を登録できる。
-            //   例: -registerPlant そら
-            // 動作確認に使うほか、**当日ARが動かなかったときの保険**でもある。
-            // 登録手段がカメラだけだと、AR が失敗した時点で日記もマイプラントも
-            // 手が出せなくなる。
-            if let name = UserDefaults.standard.string(forKey: "registerPlant"),
-                !name.isEmpty
-            {
-                store.register(name: name, species: profile.displayName)
-            }
-        } catch {
-            loadError = "\(error)"
-        }
-    }
-
-    /// センサーの取得を始める。値が来たら実センサー扱いに切り替わる
     /// ガジェットによって株が自動で選ばれたことを知らせる。
     /// UIはこれを見て、弧を一度開いて「切り替わった」ことを示す（D39）
     private(set) var autoSelectedAt: Date?
 
+    /// 同梱のはずのファイルが無い。project.yml の resources を疑う
+    enum BundleError: Error, CustomStringConvertible {
+        case missing(String)
+
+        var description: String {
+            switch self {
+            case .missing(let name): "\(name) がバンドルに含まれていません"
+            }
+        }
+    }
+
+    /// **読み込みは1つずつ失敗させる。**以前は1つの失敗で残りの仕込みも起動引数の登録も
+    /// 止まり、株が1つもない状態で始まっていた
+    init() {
+        var errors: [String] = []
+        do {
+            bank = try Self.loadBank()
+        } catch {
+            errors.append("セリフ: \(error)")
+        }
+
+        // すでに育ててきた株を用意する（L-12 / D53）。
+        // 展示では記録が積み上がる時間がないため、あらかじめ仕込む。
+        //
+        // **2株。**ひまりは一生を終えた株（時系列パネルと一致する）、
+        // こすもは3ヶ月目の生きている株。ひまりだけだと
+        // 「迎え入れた株がいない」状態に見えていた（D52）。
+        // ひまりの筋書きは時系列パネルそのものなので、セリフが読めたときだけ仕込める
+        if let bank, let himari = SeedPlan.himari(from: bank, profile: profile) {
+            seed(himari, errors: &errors)
+        }
+        seed(SeedPlan.kosumo, errors: &errors)
+
+        // 起動引数で株を登録できる。
+        //   例: -registerPlant そら
+        // 動作確認に使うほか、**当日ARが動かなかったときの保険**でもある。
+        // 登録手段がカメラだけだと、AR が失敗した時点で日記もマイプラントも
+        // 手が出せなくなる。
+        if let name = UserDefaults.standard.string(forKey: "registerPlant"), !name.isEmpty {
+            store.register(name: name, species: profile.displayName)
+        }
+
+        loadError = errors.isEmpty ? nil : errors.joined(separator: "\n")
+    }
+
+    private func seed(_ plan: SeedPlan, errors: inout [String]) {
+        do {
+            store.seed(plan, growth: try Self.loadGrowth(plan.growthFile))
+        } catch {
+            errors.append("\(plan.name)の計測値: \(error)")
+        }
+    }
+
+    /// センサーの取得を始める。値が来たら実センサー扱いに切り替わる
     func startSensor() {
         sensor.start { [weak self] payload in
             guard let self else { return }
@@ -110,16 +137,9 @@ final class AppModel {
         }
     }
 
-    func stopSensor() {
-        sensor.stop()
-        usingRealSensor = false
-    }
-
     private static func loadBank() throws -> DialogueBank {
         guard let url = Bundle.main.url(forResource: "dialogues", withExtension: nil) else {
-            throw NSError(
-                domain: "plavo", code: 1,
-                userInfo: [NSLocalizedDescriptionKey: "dialogues がバンドルに含まれていません"])
+            throw BundleError.missing("dialogues")
         }
         return try DialogueBank.load(from: url)
     }
@@ -127,9 +147,7 @@ final class AppModel {
     private static func loadGrowth(_ name: String) throws -> GrowthRecordFile {
         guard let url = Bundle.main.url(forResource: name, withExtension: "json", subdirectory: "growth")
         else {
-            throw NSError(
-                domain: "plavo", code: 2,
-                userInfo: [NSLocalizedDescriptionKey: "growth/\(name).json がバンドルに含まれていません"])
+            throw BundleError.missing("growth/\(name).json")
         }
         return try GrowthRecordFile.load(from: url)
     }
@@ -144,8 +162,8 @@ final class AppModel {
         if fromRealSensor { usingRealSensor = true }
         let jumped = value - lastMoisture >= Metrics.wateringJumpThreshold
         if jumped {
-            consecutiveWatering = lastMoisture >= 55
-        } else if value < 55 {
+            consecutiveWatering = lastMoisture >= Self.alreadyMoistFloor
+        } else if value < Self.alreadyMoistFloor {
             consecutiveWatering = false
         }
         lastMoisture = value
@@ -158,13 +176,7 @@ final class AppModel {
 
     // MARK: - セリフ
 
-    /// いま植物が言うこと。センサーの状態から帯域を決めて選ぶ
-    func currentLine() -> String? {
-        guard let bank, let band = currentBand() else { return nil }
-        _ = bank
-        return picker.pick(from: band)
-    }
-
+    /// いまの土の状態に当たる帯域。セリフはここから選ぶ
     func currentBand() -> DialogueBank.Band? {
         bank?.moistureBand(
             forSoilMoisture: soilMoisture, consecutiveWatering: consecutiveWatering)

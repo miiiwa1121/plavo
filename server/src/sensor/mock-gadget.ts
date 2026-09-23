@@ -17,6 +17,14 @@ function arg(name: string, fallback: string): string {
 const url = arg("url", "http://localhost:8787");
 const gadgetId = arg("id", "gadget-001");
 const interval = Number(arg("interval", "1000"));
+// 数でない値を渡すと setInterval が 1ms 間隔になり、中継サーバーへ送り続けてしまう
+if (!Number.isFinite(interval) || interval < 100) {
+  console.error(`--interval は100以上のミリ秒で指定してください（受け取った値: ${arg("interval", "")}）`);
+  process.exit(1);
+}
+
+/** Enter 1回の水やりで上がる量（ポイント）。アプリのモック操作と同じ */
+const WATERING_JUMP = 45;
 
 // D25 のデモに合わせ、水切れの状態から始める
 let percent = 15;
@@ -58,7 +66,7 @@ async function send(): Promise<void> {
 // 標準入力で水やりを起こせるようにする。Enter を押すと跳ね上がる
 process.stdin.setEncoding("utf-8");
 process.stdin.on("data", () => {
-  percent = Math.min(100, percent + 45);
+  percent = Math.min(100, percent + WATERING_JUMP);
   raw = toRaw(percent);
   console.log(`水やり → ${percent.toFixed(1)}%`);
 });

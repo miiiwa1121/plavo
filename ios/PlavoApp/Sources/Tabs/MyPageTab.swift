@@ -27,7 +27,6 @@ struct MyPageTab: View {
 
     /// アイコンに使う写真。選んだら切り抜き画面へ渡す
     @State private var avatarItem: PhotosPickerItem?
-    @State private var cropTarget: PickedImage?
     @State private var editingName = false
     /// 入力中の名前。保存するまで本物には書かない
     @State private var draftName = ""
@@ -35,8 +34,13 @@ struct MyPageTab: View {
     var body: some View {
         NavigationStack {
             let photos = model.store.allPhotos
-            // **動画を撮る機能はまだ無い。**写真で絞っても中身は同じ、動画で絞るといつも空
-            let shown = filter == .video ? [] : photos
+            // 動画はムービーカメラで撮った3秒（D58）。写真で絞ると動画を除く
+            let shown =
+                switch filter {
+                case .image: photos.filter { !$0.movie }
+                case .video: photos.filter(\.movie)
+                case nil: photos
+                }
             // 2本指で列の数が変わる（1・3・5・10・25列）。動きは写真アプリに合わせる
             PhotoLibraryGrid(
                 photos: shown, model: model, focus: $focus, namespace: zoom,
@@ -46,7 +50,9 @@ struct MyPageTab: View {
                     showStrip = true
                 }
             ) {
-                header(photoCount: photos.count)
+                header(
+                    photoCount: photos.count { !$0.movie },
+                    movieCount: photos.count { $0.movie })
             } empty: {
                 empty
             }
@@ -70,23 +76,8 @@ struct MyPageTab: View {
                     // マスから拡大して開き、戻るときは**そのとき見ている写真の**マスへ縮む（D46-a）
                     .navigationTransition(.zoom(sourceID: focus, in: zoom))
             }
-            .onChange(of: avatarItem) { _, item in
-                guard let item else { return }
-                Task {
-                    guard let data = try? await item.loadTransferable(type: Data.self),
-                        let image = UIImage(data: data)
-                    else { return }
-                    await MainActor.run {
-                        // そのまま丸く切ると狙った場所が入らない。範囲を選ばせる（株のアイコンと同じ）
-                        cropTarget = PickedImage(image: image)
-                        avatarItem = nil
-                    }
-                }
-            }
-            .sheet(item: $cropTarget) { picked in
-                AvatarCropView(image: picked.image) { data in
-                    model.store.setUserAvatar(data)
-                }
+            .avatarPicking($avatarItem) { data in
+                model.store.setUserAvatar(data)
             }
             .alert("名前を変更", isPresented: $editingName) {
                 TextField("名前", text: $draftName)
@@ -104,12 +95,15 @@ struct MyPageTab: View {
 
     // MARK: - 自分
 
-    private func header(photoCount: Int) -> some View {
-        VStack(alignment: .leading, spacing: 16) {
+    private func header(photoCount: Int, movieCount: Int) -> some View {
+        // **絵はここで引いてから渡す。**写真の選択のラベルは別のスレッドから作られうるので、
+        // その中で画面の状態（`model`）を読まない
+        let avatarImage = model.store.userAvatarRef.flatMap { model.store.thumbnail($0, maxPixel: 200) }
+        return VStack(alignment: .leading, spacing: 16) {
             HStack(spacing: 14) {
                 // 押すとアイコンにする写真を選ぶ
                 PhotosPicker(selection: $avatarItem, matching: .images) {
-                    avatar
+                    UserAvatar(image: avatarImage)
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("アイコンを変更")
@@ -137,8 +131,7 @@ struct MyPageTab: View {
             HStack(spacing: 0) {
                 // 写真と動画は押すと絞り込む
                 stat(photoCount, "写真", filter: .image)
-                // 動画を撮る機能はまだ無い
-                stat(0, "動画", filter: .video)
+                stat(movieCount, "動画", filter: .video)
                 stat(model.store.diaryPostCount, "日記")
                 stat(model.store.livingCount, "育成中")
                 stat(model.store.witheredCount, "見送った")
@@ -147,25 +140,6 @@ struct MyPageTab: View {
         .padding(.horizontal, 16)
         .padding(.top, 8)
         .padding(.bottom, 16)
-    }
-
-    /// 選んだ写真を丸く出す。無ければ人のかたち
-    private var avatar: some View {
-        Circle()
-            .fill(.quaternary)
-            .overlay {
-                if let ref = model.store.userAvatarRef,
-                    let image = model.store.thumbnail(ref, maxPixel: 200)
-                {
-                    Image(uiImage: image).resizable().scaledToFill()
-                } else {
-                    Image(systemName: "person.fill")
-                        .font(.system(size: 34))
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .frame(width: 72, height: 72)
-            .clipShape(Circle())
     }
 
     /// 数を1つ。`filter` を渡したものは押せて、押すと絞り込む。
@@ -208,6 +182,8 @@ struct MyPageTab: View {
                     .font(.system(size: 44))
                     .foregroundStyle(.tertiary)
                 Text("まだ動画がありません").font(.headline)
+                Text("カメラのムービーで撮ると、ここに集まります")
+                    .font(.subheadline).foregroundStyle(.secondary)
             } else {
                 Image(systemName: "photo.on.rectangle.angled")
                     .font(.system(size: 44))
@@ -219,5 +195,26 @@ struct MyPageTab: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.top, 80)
+    }
+}
+
+/// 自分のアイコン。選んだ写真を丸く出す。無ければ人のかたち
+private struct UserAvatar: View {
+    let image: UIImage?
+
+    var body: some View {
+        Circle()
+            .fill(.quaternary)
+            .overlay {
+                if let image {
+                    Image(uiImage: image).resizable().scaledToFill()
+                } else {
+                    Image(systemName: "person.fill")
+                        .font(.system(size: 34))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .frame(width: 72, height: 72)
+            .clipShape(Circle())
     }
 }

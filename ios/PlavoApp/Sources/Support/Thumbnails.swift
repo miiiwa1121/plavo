@@ -18,12 +18,15 @@ final class ThumbnailCache {
 
     private let cache = NSCache<NSString, UIImage>()
 
-    init() {
-        // 日記は数百ページある。**枚数と大きさの両方で頭打ちにする。**
-        // 400px の1枚でも展開すれば 1MB 近い。枚数だけで抑えると、
-        // 数百枚を覚えたときに持ち物が膨らむ
-        cache.countLimit = 300
-        cache.totalCostLimit = 48 * 1024 * 1024
+    /// 日記は数百ページある。**枚数と大きさの両方で頭打ちにする。**
+    /// 400px の1枚でも展開すれば 1MB 近い。枚数だけで抑えると、
+    /// 数百枚を覚えたときに持ち物が膨らむ。
+    ///
+    /// 大きい絵を覚える置き場は、枚数を絞って別に作る（`PlantStore.displayImage`）。
+    /// 同じ置き場に混ぜると、大きい絵1枚が小さい絵を十数枚追い出す
+    init(countLimit: Int = 300, totalCostLimit: Int = 48 * 1024 * 1024) {
+        cache.countLimit = countLimit
+        cache.totalCostLimit = totalCostLimit
     }
 
     /// 小さい絵を返す。無ければ作って覚える。

@@ -48,8 +48,8 @@ private struct ScrollEdgeFade: View {
     let bottomPadding: CGFloat
     @Environment(\.colorScheme) private var colorScheme
 
-    /// 上のほうの白（ダークでは黒）の濃さ
-    private var peak: Double { colorScheme == .dark ? 0.5 : 0.5 }
+    /// 上のほうの白（ダークでは黒）の濃さ。ライトとダークで同じ
+    private let peak: Double = 0.5
 
     /// ぼかしの強さ。ぼかしの層ごと薄めて弱める
     private let blur: Double = 0.9
