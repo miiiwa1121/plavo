@@ -36,6 +36,9 @@ final class AppModel {
     /// トーク（D59）。おうちごとのグループチャット。株と写真に起きたことが自動で流れる
     let talk: TalkStore
 
+    /// みんなの日記（L-15）。ほかの人の日記。架空の書き手の分を仕込む
+    let community = CommunityStore()
+
     /// 展示に使う植物のプロファイル。種類が決まったら差し替える（D17-a）
     let profile: PlantProfile = .default
 

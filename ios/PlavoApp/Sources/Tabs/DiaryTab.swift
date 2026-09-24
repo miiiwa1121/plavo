@@ -2,35 +2,99 @@ import PhotosUI
 import PlavoCore
 import SwiftUI
 
-/// 日記（D14 / D26）。
+/// 日記（D14 / D26 / L-15）。**自分の日記とみんなの日記の2ページ。**
 ///
-/// **1日1件。**実際の日記帳と同じで、今日のページに書き足していく。
-/// 別画面で書いて保存するのではなく、カードをその場で書き換える。
+/// 見出し「日記」の下の切り替え（`CapsuleTabBar`）か、横にスライドしてめくる。
 ///
+/// **自分の日記**は1日1件。実際の日記帳と同じで、今日のページに書き足していく。
 /// 一覧は3列の正方形グリッド。タップするとその位置から縦フィードが開き、
 /// 上下にスクロールして前後の日記を続けて読める。
+///
+/// **みんなの日記**は、ほかの人の日記の縦のタイムライン（`CommunityFeed`）。
 struct DiaryTab: View {
     @Bindable var model: AppModel
     /// マスをタップすると、そのページから縦フィードへ進む
     @State private var path = NavigationPath()
+    @State private var page: DiaryPage = Self.initialPage
+    /// 上の切り替えの高さ。中身をその下から始めるために測る
+    @State private var pickerHeight: CGFloat = 47
+    /// ページの中身が、画面の上端からどれだけずれて置かれているか。測って打ち消す（マイプラント詳細と同じ）
+    @State private var pageShift: CGFloat = 0
+
+    /// 動作確認用。`-startDiaryPage 1` でみんなの日記から始める（ios/README.md）
+    private static var initialPage: DiaryPage {
+        DiaryPage(rawValue: UserDefaults.standard.integer(forKey: "startDiaryPage")) ?? .mine
+    }
 
     var body: some View {
         NavigationStack(path: $path) {
-            Group {
-                if model.store.diary.isEmpty && model.store.plants.isEmpty {
-                    emptyState
-                } else {
-                    DiaryGrid(model: model, path: $path)
+            // **帯を敷かず、切り替えは中身の上に浮かせる**（D45。マイプラント詳細と同じ作り）。
+            // ページ形式の TabView は枠の内側しか描かないので、画面の端まで広げ、上下の余白は各ページに足し直す
+            GeometryReader { proxy in
+                let top = proxy.safeAreaInsets.top + pickerHeight
+                let bottom = proxy.safeAreaInsets.bottom + pageShift
+
+                TabView(selection: $page) {
+                    pageContent(mine, top: top, bottom: bottom)
+                        .tag(DiaryPage.mine)
+                    pageContent(CommunityFeed(model: model), top: top, bottom: bottom)
+                        .tag(DiaryPage.everyone)
+                }
+                .tabViewStyle(.page(indexDisplayMode: .never))
+                .ignoresSafeArea()
+                // タブバーの裏のぼかし。ページ形式の TabView の中ではシステムのものが出ないので自前で敷く。
+                // **高さは画面の下端から 96pt。**プロフィール（システムのもの）の画面写真と並べて、
+                // タブバーの上端あたりから始まるようにそろえた（安全領域の高さから出すと 180pt 超になり、濃すぎた）
+                .bottomScrollEdgeFade(height: 96)
+                .overlay(alignment: .top) {
+                    CapsuleTabBar(
+                        selection: $page,
+                        items: DiaryPage.allCases.map { .init($0, title: $0.title) },
+                        itemWidth: 110
+                    )
+                    .padding(.bottom, 8)
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { pickerHeight = $0 }
+                    .padding(.top, proxy.safeAreaInsets.top)
+                    // ぼかしは画面の幅いっぱいに敷く
+                    .frame(maxWidth: .infinity)
+                    .scrollEdgeFade(bottomPadding: 8)
+                    .frame(maxHeight: .infinity, alignment: .top)
+                    .ignoresSafeArea()
                 }
             }
-            // **大見出しにしない。細い見出しにする。**ほかのタブの一番上の画面もこれに揃える。
-            //
-            // 大見出しにすると、上へ送ったときにカクつく。マスを無地の色に置き換えても
-            // 治らなかったので、原因はマスの中身（写真・影）ではなく、
-            // 大見出しと並べ方（`ScrollView` ＋ `LazyVGrid`）の組み合わせにある
+            // 切り替えを押しても、スライドでめくっても同じ手応えにする
+            .sensoryFeedback(.tick, trigger: page)
+            // **見出しの「日記」は残し、切り替えはその下に置く**（マイプラント詳細と同じ並び）。
+            // 一番上の画面の見出しは細くする（D56）
             .navigationTitle("日記")
             .navigationBarTitleDisplayMode(.inline)
+            // **ページの中ではなく、ここに置く。**ページ形式の TabView の中に置くと
+            // 「lazy なコンテナの中」として無視され、マスを押しても移らない（マイプラント詳細と同じ）
+            .navigationDestination(for: UUID.self) { id in
+                DiaryFeedView(model: model, startId: id)
+            }
         }
+    }
+
+    /// 自分の日記。3列のグリッド
+    @ViewBuilder
+    private var mine: some View {
+        if model.store.diary.isEmpty && model.store.plants.isEmpty {
+            emptyState.frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            DiaryGrid(model: model, path: $path)
+        }
+    }
+
+    /// 1ページ分。上下の余白を足し直し、ずれを測る（マイプラント詳細の `pageContent` と同じ）
+    private func pageContent(_ content: some View, top: CGFloat, bottom: CGFloat) -> some View {
+        content
+            .safeAreaPadding(.top, top)
+            .safeAreaPadding(.bottom, bottom)
+            .padding(.top, -pageShift)
+            .onGeometryChange(for: CGFloat.self) {
+                $0.frame(in: .global).minY - $0.safeAreaInsets.top
+            } action: { pageShift = $0 }
     }
 
     /// 「データがありません」とは書かない（原則3）
@@ -42,6 +106,19 @@ struct DiaryTab: View {
             Text("まだ何も書かれていません").font(.headline)
             Text("カメラを向けて、出会うところから")
                 .font(.subheadline).foregroundStyle(.secondary)
+        }
+    }
+}
+
+/// 日記の2ページ。**番号は起動引数 `-startDiaryPage` の値**（ios/README.md）
+enum DiaryPage: Int, CaseIterable, Hashable {
+    case mine
+    case everyone
+
+    var title: String {
+        switch self {
+        case .mine: "自分の日記"
+        case .everyone: "みんなの日記"
         }
     }
 }
@@ -114,9 +191,7 @@ private struct DiaryGrid: View {
         }
         // **`.animation` をスクロールに掛けない。**
         // 掛けると、送っている最中に作られるマスの配置まで動きの対象になる
-        .navigationDestination(for: UUID.self) { id in
-            DiaryFeedView(model: model, startId: id)
-        }
+        // 縦フィードへの行き先は DiaryTab に置く（ページの中では効かない）
     }
 }
 

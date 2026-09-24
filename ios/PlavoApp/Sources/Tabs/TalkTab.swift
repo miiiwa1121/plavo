@@ -29,18 +29,49 @@ struct TalkTab: View {
             Group {
                 switch layout {
                 case .rows:
-                    List(households) { household in
-                        NavigationLink(value: TalkRoute.household(household.id)) {
-                            HouseholdRow(model: model, household: household)
+                    List {
+                        ForEach(households) { household in
+                            NavigationLink(value: TalkRoute.household(household.id)) {
+                                HouseholdRow(model: model, household: household)
+                            }
+                            .talkListRow()
                         }
-                        // 行の間の線は引かない。上下の余白も詰める
-                        .listRowSeparator(.hidden)
-                        .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+                        // いちばん下で、グループを作る（形だけ）。**灰色の横長の四角。**行の幅いっぱいに、高さはアイコンにそろえる
+                        Button {
+                        } label: {
+                            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                .fill(Color(.tertiarySystemFill))
+                                .overlay {
+                                    Image(systemName: "plus")
+                                        .font(.system(size: 20, weight: .medium))
+                                        .foregroundStyle(.secondary)
+                                }
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 52)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("グループを作る")
+                        .talkListRow()
                     }
                     .listStyle(.plain)
                 case .icons:
                     HouseholdGrid(model: model, households: households, opened: $openedPanel)
                 }
+            }
+            // グループを作る。**画面の右下に固定する**（中身と一緒に流れない）。形だけで、まだ何もしない
+            .overlay(alignment: .bottomTrailing) {
+                Button {
+                } label: {
+                    Image(systemName: "plus")
+                        .font(.system(size: 22, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 56, height: 56)
+                        .background(Color.accentColor, in: Circle())
+                        .shadow(color: .black.opacity(0.15), radius: 8, y: 3)
+                }
+                .accessibilityLabel("グループを作る")
+                .padding(.trailing, 20)
+                .padding(.bottom, 16)
             }
             .navigationTitle("トーク")
             // 一番上の画面の見出しは細くする。日記に揃える（D56）
@@ -48,7 +79,8 @@ struct TalkTab: View {
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     LayoutSwitch(layout: $layout)
-                        .onChange(of: layout) { openedPanel = nil }
+                        // アイコン表示は、先頭のおうちの枠を開いた状態から始める
+                        .onChange(of: layout) { openedPanel = defaultPanel(layout, households) }
                 }
             }
             .navigationDestination(for: TalkRoute.self) { route in
@@ -66,6 +98,7 @@ struct TalkTab: View {
                 guard !launchHandled else { return }
                 launchHandled = true
                 let defaults = UserDefaults.standard
+                openedPanel = defaultPanel(layout, households)
                 if let raw = defaults.string(forKey: "openPanel"), let index = Int(raw),
                     households.indices.contains(index)
                 {
@@ -119,12 +152,28 @@ private struct LayoutSwitch: View {
     }
 }
 
+extension View {
+    /// 列表示の1行。**行の間の線は引かず、上下の余白も詰める。**
+    /// List 全体に付けても行には効かないので、行ごとに付ける
+    fileprivate func talkListRow() -> some View {
+        listRowSeparator(.hidden)
+            .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+    }
+}
+
 /// トークの一覧の見せ方。**値は起動引数 `-talkLayout` の値**（ios/README.md）
 enum TalkListLayout: String {
     /// 列表示。名前・人数・最後の1件を並べる
     case rows
     /// アイコン表示。アイコンだけを並べ、押すとメンバーと株の枠が開く
     case icons
+}
+
+extension TalkTab {
+    /// 見せ方を変えたときに開いておく枠。**アイコン表示なら先頭のおうち**、列表示なら無し
+    fileprivate func defaultPanel(_ layout: TalkListLayout, _ households: [Household]) -> UUID? {
+        layout == .icons ? households.first?.id : nil
+    }
 }
 
 /// トークの中の行き先。株を押すと、マイプラントと同じ詳細を開く
@@ -217,6 +266,13 @@ private struct HouseholdGrid: View {
                             .buttonStyle(.plain)
                             .accessibilityLabel(household.name)
                         }
+                        // 並びのいちばん後ろで、グループを作る（形だけ）
+                        Button {
+                        } label: {
+                            AddIcon(size: Self.iconSize)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("グループを作る")
                     }
                     .padding(.horizontal, Self.spacing)
                 }
@@ -264,6 +320,7 @@ private struct HouseholdPanel: View {
                         MemberAvatar(model: model, memberId: id, size: Self.avatarSize)
                     }
                 }
+                invite("メンバーを招待")
             }
 
             section("植物") {
@@ -277,6 +334,7 @@ private struct HouseholdPanel: View {
                         .buttonStyle(.plain)
                     }
                 }
+                invite("植物を招待")
             }
         }
         .padding(16)
@@ -289,11 +347,20 @@ private struct HouseholdPanel: View {
             Text(title)
                 .font(.caption)
                 .foregroundStyle(.secondary)
-            ScrollView(.horizontal) {
-                HStack(alignment: .top, spacing: 14) { content() }
-            }
-            .scrollIndicators(.hidden)
+            // 横に送らず、**折り返して下に並べる**
+            WrapLayout(spacing: 14, lineSpacing: 12) { content() }
         }
+    }
+
+    /// メンバー・植物の並びの後ろに置く招待のボタン（形だけ）。
+    /// 名前の行ぶんの高さを空けて、アイコンの高さをほかとそろえる
+    private func invite(_ label: String) -> some View {
+        Button {
+        } label: {
+            labeled(" ") { AddIcon(size: Self.avatarSize) }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(label)
     }
 
     private func labeled<Icon: View>(_ name: String, @ViewBuilder icon: () -> Icon) -> some View {
@@ -304,6 +371,72 @@ private struct HouseholdPanel: View {
                 .lineLimit(1)
         }
         .frame(width: Self.avatarSize + 12)
+    }
+}
+
+/// 作る・招待するための＋のアイコン。**灰色**（左下の作成ボタンだけが緑）
+private struct AddIcon: View {
+    let size: CGFloat
+
+    var body: some View {
+        Circle()
+            .fill(Color(.tertiarySystemFill))
+            .overlay {
+                Image(systemName: "plus")
+                    .font(.system(size: size * 0.36, weight: .medium))
+                    .foregroundStyle(.secondary)
+            }
+            .frame(width: size, height: size)
+    }
+}
+
+/// 左から詰めて並べ、幅が足りなくなったら次の段へ折り返す
+private struct WrapLayout: Layout {
+    var spacing: CGFloat
+    var lineSpacing: CGFloat
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let rows = arrange(subviews, width: proposal.width ?? .infinity)
+        let width = rows.map(\.width).max() ?? 0
+        let height = rows.map(\.height).reduce(0, +) + lineSpacing * CGFloat(max(0, rows.count - 1))
+        return CGSize(width: proposal.width ?? width, height: height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var y = bounds.minY
+        for row in arrange(subviews, width: bounds.width) {
+            var x = bounds.minX
+            for index in row.indices {
+                let size = subviews[index].sizeThatFits(.unspecified)
+                subviews[index].place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(size))
+                x += size.width + spacing
+            }
+            y += row.height + lineSpacing
+        }
+    }
+
+    private struct Row {
+        var indices: [Int] = []
+        var width: CGFloat = 0
+        var height: CGFloat = 0
+    }
+
+    private func arrange(_ subviews: Subviews, width: CGFloat) -> [Row] {
+        var rows: [Row] = []
+        var row = Row()
+        for index in subviews.indices {
+            let size = subviews[index].sizeThatFits(.unspecified)
+            let next = row.indices.isEmpty ? size.width : row.width + spacing + size.width
+            if next > width, !row.indices.isEmpty {
+                rows.append(row)
+                row = Row()
+            }
+            row.width = row.indices.isEmpty ? size.width : row.width + spacing + size.width
+            row.height = max(row.height, size.height)
+            row.indices.append(index)
+        }
+        if !row.indices.isEmpty { rows.append(row) }
+        return rows
     }
 }
 
@@ -341,7 +474,8 @@ struct HouseholdChatView: View {
         .defaultScrollAnchor(.bottom)
         .defaultScrollAnchor(.bottom, for: .sizeChanges)
         .scrollDismissesKeyboard(.interactively)
-        .topBar { PlantStrip(model: model, plantIds: household?.plantIds ?? []) }
+        // **safeAreaBar にしない。**スクロールの端のぼかしが帯の下に掛かり、株のアイコンの下に影のように見えた
+        .safeAreaInset(edge: .top) { PlantStrip(model: model, plantIds: household?.plantIds ?? []) }
         .bottomBar { composer }
         .navigationTitle(household?.name ?? "")
         .navigationBarTitleDisplayMode(.inline)
@@ -430,6 +564,9 @@ private struct PlantStrip: View {
             .padding(.vertical, 6)
         }
         .scrollIndicators(.hidden)
+        // **枠で切り取らない。**ガラスの落とす影がスクロールの枠で四角く切られ、
+        // 株のアイコンの下に帯のような影が見えていた
+        .scrollClipDisabled()
     }
 }
 
@@ -771,16 +908,6 @@ extension AppModel {
 // MARK: - 上下の帯
 
 extension View {
-    /// 上に固定する帯。**iOS 26 はスクロールの端の見え方を帯の下まで伸ばす**（`safeAreaBar`）
-    @ViewBuilder
-    fileprivate func topBar<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
-        if #available(iOS 26.0, *) {
-            safeAreaBar(edge: .top, content: content)
-        } else {
-            safeAreaInset(edge: .top, content: content)
-        }
-    }
-
     @ViewBuilder
     fileprivate func bottomBar<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
         if #available(iOS 26.0, *) {

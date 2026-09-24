@@ -148,6 +148,12 @@ xcrun simctl launch <device> dev.plavo.PlavoApp -startTab 3 -openHousehold 1
 | `-talkLayout icons` | 一覧をアイコン表示で始める（`rows` で列表示。既定は列表示・`TalkListLayout`） |
 | `-openPanel <0〜>` | アイコン表示で、上からその番目のおうちの枠を開いて始める |
 
+日記のページを選んで始めることもできる。
+
+| 引数 | 効き目 |
+|---|---|
+| `-startDiaryPage <0〜1>` | 0 自分の日記 / 1 みんなの日記（`DiaryPage`） |
+
 ### 実機が必要な部分
 
 **ARKit はシミュレータで動かない。**カメラタブは実機でしか確認できない。マイプラント・日記・トーク・プロフィールはシミュレータで確認できる。

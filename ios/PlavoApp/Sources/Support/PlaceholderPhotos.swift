@@ -88,6 +88,36 @@ enum PlaceholderPhotos {
             leafFrom: 9, leafEvery: 10,
             fadingFrom: nil, yellowingFrom: nil, dryingFrom: nil,
             sheddingFrom: nil, baldFrom: nil)
+
+        /// 白いコスモス（みんなの日記の、ほかの人の株）
+        static let whiteCosmos = Look(
+            id: "whiteCosmos",
+            petal: Rgb(r: 0.97, g: 0.96, b: 0.94),
+            fadedPetal: Rgb(r: 0.92, g: 0.90, b: 0.86),
+            flowerCenter: Rgb(r: 0.98, g: 0.84, b: 0.35),
+            petalCount: 8,
+            flowerRadius: 0.075,
+            seedPetal: Rgb(r: 0.90, g: 0.88, b: 0.84),
+            seedCenter: Rgb(r: 0.80, g: 0.66, b: 0.30),
+            growthFrom: 6, growthSpan: 68,
+            leafFrom: 9, leafEvery: 10,
+            fadingFrom: nil, yellowingFrom: nil, dryingFrom: nil,
+            sheddingFrom: nil, baldFrom: nil)
+
+        /// マリーゴールド（みんなの日記の、ほかの人の株）。橙の小ぶりな花
+        static let marigold = Look(
+            id: "marigold",
+            petal: Rgb(r: 0.98, g: 0.55, b: 0.10),
+            fadedPetal: Rgb(r: 0.93, g: 0.68, b: 0.40),
+            flowerCenter: Rgb(r: 0.85, g: 0.40, b: 0.05),
+            petalCount: 12,
+            flowerRadius: 0.07,
+            seedPetal: Rgb(r: 0.80, g: 0.55, b: 0.30),
+            seedCenter: Rgb(r: 0.45, g: 0.30, b: 0.12),
+            growthFrom: 5, growthSpan: 45,
+            leafFrom: 7, leafEvery: 6,
+            fadingFrom: nil, yellowingFrom: nil, dryingFrom: nil,
+            sheddingFrom: nil, baldFrom: nil)
     }
 
     /// - Parameters:

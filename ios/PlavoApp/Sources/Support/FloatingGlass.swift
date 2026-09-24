@@ -43,6 +43,61 @@ extension View {
     }
 }
 
+extension View {
+    /// 下に潜った中身を、白（ダークでは黒）に溶かして消す（タブバーの裏の見え方）。
+    ///
+    /// ふつうの画面ではタブバーがこれをやるが、**ページ形式の TabView の中のスクロールには効かない**
+    /// （上端と同じ理由）。日記の2ページで、下にだけぼかしが無かった。
+    ///
+    /// 画面の下端から `height` の高さに敷く。下ほど濃く、上へなめらかに透明になる。
+    /// 濃さとぼかしは上端（`scrollEdgeFade`）とそろえる
+    func bottomScrollEdgeFade(height: CGFloat) -> some View {
+        overlay {
+            // **画面の高さいっぱいを取ってから下に寄せる。**高さだけ決めて下に置くと、
+            // 安全領域（タブバーの上）で止まり、ぼかしがタブバーの上端で線のように切れた
+            BottomEdgeFade()
+                .frame(height: height)
+                .frame(maxHeight: .infinity, alignment: .bottom)
+                .allowsHitTesting(false)
+                .ignoresSafeArea()
+        }
+    }
+}
+
+/// `bottomScrollEdgeFade` の中身。上端の `ScrollEdgeFade` を上下に返したもの
+private struct BottomEdgeFade: View {
+    @Environment(\.colorScheme) private var colorScheme
+
+    private let peak: Double = 0.5
+    private let blur: Double = 0.9
+
+    private var blurStyle: UIBlurEffect.Style { colorScheme == .dark ? .dark : .extraLight }
+
+    /// 透明（上）から不透明（下）へ。下の 40% は濃さを保つ
+    private var curve: [(location: CGFloat, alpha: Double)] {
+        let steps = 8
+        let solidFrom: CGFloat = 0.6
+        return (0...steps).map { i in
+            let t = CGFloat(i) / CGFloat(steps)
+            let eased = t * t * (3 - 2 * t)
+            return (solidFrom * t, Double(eased))
+        } + [(1, 1)]
+    }
+
+    var body: some View {
+        ZStack {
+            GradientBlur(style: blurStyle, stops: curve.map { ($0.location, $0.alpha * blur) })
+            Rectangle()
+                .fill(Color(uiColor: .systemBackground))
+                .mask {
+                    LinearGradient(
+                        stops: curve.map { .init(color: .black.opacity($0.alpha * peak), location: $0.location) },
+                        startPoint: .top, endPoint: .bottom)
+                }
+        }
+    }
+}
+
 /// `scrollEdgeFade` の中身。
 private struct ScrollEdgeFade: View {
     let bottomPadding: CGFloat
