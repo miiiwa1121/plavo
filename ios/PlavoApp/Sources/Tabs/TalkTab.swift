@@ -476,7 +476,7 @@ struct HouseholdChatView: View {
         .scrollDismissesKeyboard(.interactively)
         // **safeAreaBar にしない。**スクロールの端のぼかしが帯の下に掛かり、株のアイコンの下に影のように見えた
         .safeAreaInset(edge: .top) { PlantStrip(model: model, plantIds: household?.plantIds ?? []) }
-        .bottomBar { composer }
+        .bottomSafeAreaBar { composer }
         .navigationTitle(household?.name ?? "")
         .navigationBarTitleDisplayMode(.inline)
         // チャットの間はタブバーを下げる。入力欄を下端に置くため（ほかのチャットアプリと同じ）
@@ -907,13 +907,3 @@ extension AppModel {
 
 // MARK: - 上下の帯
 
-extension View {
-    @ViewBuilder
-    fileprivate func bottomBar<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
-        if #available(iOS 26.0, *) {
-            safeAreaBar(edge: .bottom, content: content)
-        } else {
-            safeAreaInset(edge: .bottom, content: content)
-        }
-    }
-}

@@ -16,11 +16,6 @@ struct DiaryTab: View {
     /// マスをタップすると、そのページから縦フィードへ進む
     @State private var path = NavigationPath()
     @State private var page: DiaryPage = Self.initialPage
-    /// 横に引いている量。指に付いてページが動く
-    @State private var drag: CGFloat = 0
-    /// 引いている向き。**初めに大きく動いた向きで決め、指を離すまで変えない。**
-    /// 決めないと、縦に送っている最中の少しの横ぶれでページが動く
-    @State private var dragAxis: Axis?
 
     /// 動作確認用。`-startDiaryPage 1` でみんなの日記から始める（ios/README.md）
     private static var initialPage: DiaryPage {
@@ -29,20 +24,15 @@ struct DiaryTab: View {
 
     var body: some View {
         NavigationStack(path: $path) {
-            // **ページ形式の TabView を使わない。**あれの中のスクロールには、見出しとタブバーの
-            // ぼかし（システムのもの）が掛からない。ほかのタブと同じぼかしにするため、
-            // 2ページを横に並べて指でずらす。どちらのページのスクロールも、見出しとタブバーに
-            // 直に接するので、システムのぼかしがそのまま掛かる
+            // 横に引いてめくる。**上下のぼかしはシステムのもの**（プロフィールやトークと同じ。`SwipePager`）
             GeometryReader { proxy in
-                let width = proxy.size.width
-                HStack(spacing: 0) {
-                    mine(width: width).frame(width: width)
-                    CommunityFeed(model: model).frame(width: width)
+                SwipePager(selection: $page, pages: DiaryPage.allCases) { page in
+                    switch page {
+                    case .mine: mine(width: proxy.size.width)
+                    case .everyone: CommunityFeed(model: model)
+                    }
                 }
-                .frame(width: width, alignment: .leading)
-                .offset(x: -CGFloat(page.rawValue) * width + drag)
             }
-            .simultaneousGesture(swipe)
             // 切り替えは見出しの下に置く。**`safeAreaBar` にする。**スクロールの端のぼかしが
             // 切り替えの下まで伸び、見出しから切り替えまでが1つのバーとして見える
             .topSafeAreaBar {
@@ -73,34 +63,6 @@ struct DiaryTab: View {
         } else {
             DiaryGrid(model: model, path: $path, width: width)
         }
-    }
-
-    /// 横に引いてページをめくる。**縦のスクロールと同時に受ける**（`simultaneousGesture`）が、
-    /// 横に引いていると決まったときだけページを動かす
-    private var swipe: some Gesture {
-        DragGesture(minimumDistance: 12)
-            .onChanged { value in
-                let dx = value.translation.width
-                let dy = value.translation.height
-                if dragAxis == nil { dragAxis = abs(dx) > abs(dy) ? .horizontal : .vertical }
-                guard dragAxis == .horizontal else { return }
-                // 端のページから外へ引いたときは、重く（3分の1しか）付いてくる
-                let outward = (page == .mine && dx > 0) || (page == .everyone && dx < 0)
-                drag = outward ? dx / 3 : dx
-            }
-            .onEnded { value in
-                defer { dragAxis = nil }
-                guard dragAxis == .horizontal else { return }
-                // 指を離したあとの行き先（勢いを含む）で決める。画面の4分の1を越えたらめくる
-                let predicted = value.predictedEndTranslation.width
-                var next = page
-                if predicted < -80, page == .mine { next = .everyone }
-                if predicted > 80, page == .everyone { next = .mine }
-                withAnimation(.snappy) {
-                    page = next
-                    drag = 0
-                }
-            }
     }
 
     /// 「データがありません」とは書かない（原則3）

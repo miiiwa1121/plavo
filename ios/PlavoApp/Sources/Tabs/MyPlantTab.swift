@@ -216,10 +216,6 @@ struct PlantDetailView: View {
     @State private var page: PlantDetailPage
     /// ギャラリーの絞り込み（全体・写真・動画・パラパラ）
     @State private var galleryFilter: GalleryFilter
-    /// 上の切り替えの高さ。中身をその下から始めるために測る
-    @State private var pickerHeight: CGFloat = 47
-    /// ページの中身が、画面の上端からどれだけずれて置かれているか。測って打ち消す
-    @State private var pageShift: CGFloat = 0
     /// ギャラリーで見ている写真。1枚を追う画面・全画面と共有する（D46）。
     /// 戻るとき、この写真のマスへ縮めるため
     @State private var galleryFocus = ""
@@ -250,45 +246,24 @@ struct PlantDetailView: View {
     var body: some View {
         // **帯を敷かない。日記と同じく、中身は画面の端まで流れ、操作部品はその上に浮く**（D45）。
         //
-        // ページ形式の TabView は枠の内側しか描かず、ページの中の余白も失う。
-        // そのままだと中身がタブバーの手前でまっすぐ切れ、後ろに無地の帯があるように見える。
-        // TabView ごと画面の端まで広げ、上下の余白は各ページに足し直す。
-        //
-        // **広げたページは、画面の上端から少し下にずれて置かれる**（iPhone 17 で 16pt）。
-        // TabView はページの枠を安全領域の高さで作り、広げた中身をその上下中央に置くらしい。
-        // ずれを足さないと、時間幅のバーがタブバーに重なる。式を決め打ちせず、測って打ち消す。
-        GeometryReader { proxy in
-            // 中身はずれのぶん上へ伸ばしてあり、画面の上端から始まる（`pageContent`）
-            let top = proxy.safeAreaInsets.top + pickerHeight
-            let bottom = proxy.safeAreaInsets.bottom + pageShift
-
-            TabView(selection: $page) {
-                pageContent(records, top: top, bottom: bottom)
-                    .tag(PlantDetailPage.records)
-                pageContent(GrowthSection(model: model, plantId: plantId), top: top, bottom: bottom)
-                    .tag(PlantDetailPage.growth)
-                pageContent(gallery, top: top, bottom: bottom)
-                    .tag(PlantDetailPage.gallery)
+        // 横に引いてめくる。**上下のぼかしはシステムのもの**（プロフィールやトークと同じ。`SwipePager`）。
+        // 以前はページ形式の TabView を使い、見出しの裏のぼかしを自前で敷いていた。
+        // あれは一時的な特例で、本来の形ではなかった
+        SwipePager(selection: $page, pages: PlantDetailPage.allCases) { page in
+            switch page {
+            case .records: records
+            case .growth: GrowthSection(model: model, plantId: plantId)
+            case .gallery: gallery
             }
-            .tabViewStyle(.page(indexDisplayMode: .never))
-            .ignoresSafeArea()
-            .overlay(alignment: .top) {
-                CapsuleTabBar(
-                    selection: $page,
-                    items: PlantDetailPage.allCases.map { .init($0, title: $0.title) },
-                    itemWidth: 78
-                )
-                .padding(.bottom, 8)
-                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { pickerHeight = $0 }
-                // 重ねる側も画面の上端から数える。題名と時計の下に置くぶんは自分で下げる
-                .padding(.top, proxy.safeAreaInsets.top)
-                // **ぼかしは画面の幅いっぱいに敷く。**切り替えは中身の幅しか持たないので、
-                // 広げずに敷くと切り替えの真上の細い列にしか掛からない
-                .frame(maxWidth: .infinity)
-                .scrollEdgeFade(bottomPadding: 8)
-                .frame(maxHeight: .infinity, alignment: .top)
-                .ignoresSafeArea()
-            }
+        }
+        // 切り替えは見出しの下のバーに置く。ぼかしが切り替えの下まで伸びる
+        .topSafeAreaBar {
+            CapsuleTabBar(
+                selection: $page,
+                items: PlantDetailPage.allCases.map { .init($0, title: $0.title) },
+                itemWidth: 78
+            )
+            .padding(.bottom, 8)
         }
         .background(Color(uiColor: .systemGroupedBackground))
         // 切り替えを押しても、スワイプでめくっても同じ手応えにする。
@@ -297,7 +272,7 @@ struct PlantDetailView: View {
         .navigationTitle(plant?.name ?? "")
         .navigationBarTitleDisplayMode(.inline)
         // **ギャラリーのページの中ではなく、ここに置く。**
-        // ページ形式の TabView の中に置くと「lazy なコンテナの中」として無視され、
+        // 以前のページ形式の TabView の中では「lazy なコンテナの中」として無視され、
         // グリッドの写真をタップしても移らなかった
         .navigationDestination(isPresented: $showGalleryStrip) {
             // グリッドは新しい順。1枚を追う画面は時間の流れで並べる（D46）
@@ -336,27 +311,6 @@ struct PlantDetailView: View {
     }
 
     // MARK: - 記録
-
-    /// 1ページ分。上下の余白を足し直し、**ずれを測る。**
-    ///
-    /// **ずれはどのページでも測る。**以前は記録だけで測っていて、育成やギャラリーから
-    /// 開いたとき（`-startDetailPage`）は記録が描かれず、ずれが 0 のままだった。
-    /// その 16pt ぶん時間幅のバーが下がり、タブバーの下に潜った。
-    /// ずれはどのページも同じなので、どれが測っても同じ値になる
-    ///
-    /// **中身はずれのぶん上へ伸ばす。**ページは画面の上端から 16pt 下に置かれるので、
-    /// そのままだとスクロールした中身が上端の 16pt に届かない。上端のぼかしは半透明なので、
-    /// そこだけ中身が無く、線で切れたように見えた。
-    /// ずれはページの枠で測る（伸ばした中身で測ると 0 になり、伸ばす量も 0 に戻る）
-    private func pageContent(_ content: some View, top: CGFloat, bottom: CGFloat) -> some View {
-        content
-            .safeAreaPadding(.top, top)
-            .safeAreaPadding(.bottom, bottom)
-            .padding(.top, -pageShift)
-            .onGeometryChange(for: CGFloat.self) {
-                $0.frame(in: .global).minY - $0.safeAreaInsets.top
-            } action: { pageShift = $0 }
-    }
 
     /// 節目の記録。数値は出さない（原則2）
     private var records: some View {
@@ -498,8 +452,9 @@ struct PlantDetailView: View {
             galleryEmpty
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        // **縦にスクロールしても絞り込みの切り替えは残す**（育成の時間幅と同じ）
-        .safeAreaInset(edge: .bottom) { galleryFilterBar }
+        // **縦にスクロールしても絞り込みの切り替えは残す**（育成の時間幅と同じ）。
+        // 下のバーにして、タブバーの裏のぼかしを切り替えの上まで伸ばす
+        .bottomSafeAreaBar { galleryFilterBar }
     }
 
     /// 絞り込んだ写真。新しい順
@@ -560,29 +515,39 @@ struct PlantDetailView: View {
         if photos.isEmpty {
             empty()
         } else {
+            // **`LazyVGrid` を使わず、3枚ずつの段を縦に重ねる**（自分の日記と同じ）。
+            // `SwipePager` の中で `LazyVGrid` にすると、切り替えの下に 50pt ほどの空きができた
+            let rows = stride(from: 0, to: photos.count, by: 3).map { Array(photos[$0..<min($0 + 3, photos.count)]) }
             ScrollViewReader { proxy in
                 ScrollView {
-                    LazyVGrid(
-                        columns: Array(repeating: GridItem(.flexible(), spacing: 2), count: 3),
-                        spacing: 2
-                    ) {
-                        ForEach(photos, id: \.ref) { photo in
-                            // 見ている写真を先に決めてから開く。拡大の起点をそのマスにするため
-                            Button {
-                                focus.wrappedValue = photo.ref
-                                show.wrappedValue = true
-                            } label: {
-                                GalleryTile(ref: photo.ref, date: photo.date, model: model)
+                    LazyVStack(spacing: 2) {
+                        ForEach(rows, id: \.first?.ref) { row in
+                            HStack(spacing: 2) {
+                                ForEach(row, id: \.ref) { photo in
+                                    // 見ている写真を先に決めてから開く。拡大の起点をそのマスにするため
+                                    Button {
+                                        focus.wrappedValue = photo.ref
+                                        show.wrappedValue = true
+                                    } label: {
+                                        GalleryTile(ref: photo.ref, date: photo.date, model: model)
+                                    }
+                                    .buttonStyle(.plain)
+                                    .matchedTransitionSource(id: photo.ref, in: zoom)
+                                }
+                                // 最後の段が3枚に満たなくても、マスの大きさはそろえる
+                                ForEach(row.count..<3, id: \.self) { _ in Color.clear.aspectRatio(1, contentMode: .fit) }
                             }
-                            .buttonStyle(.plain)
-                            .matchedTransitionSource(id: photo.ref, in: zoom)
-                            .id(photo.ref)
+                            // 段ごとに印を付ける。戻る先の写真の段へ送る
+                            .id(row.first?.ref)
                         }
                     }
                 }
                 // 先の画面で写真を変えたら、戻る先のマスが見える位置まで送っておく。
-                // 見えていないマスには縮んで戻れない
-                .onChange(of: focus.wrappedValue) { _, ref in proxy.scrollTo(ref) }
+                // 見えていないマスには縮んで戻れない。**段で送る**（マスは段の中にあり、印を持たない）
+                .onChange(of: focus.wrappedValue) { _, ref in
+                    guard let index = photos.firstIndex(where: { $0.ref == ref }) else { return }
+                    proxy.scrollTo(photos[index - index % 3].ref)
+                }
             }
         }
     }

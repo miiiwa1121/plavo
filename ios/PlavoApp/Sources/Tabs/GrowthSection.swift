@@ -50,8 +50,8 @@ struct GrowthSection: View {
                 .padding(.horizontal)
                 .padding(.vertical, 4)
             }
-            // **縦にスクロールしても幅のバーは残す**
-            .safeAreaInset(edge: .bottom) { rangeBar(domain: domain) }
+            // **縦にスクロールしても幅のバーは残す**。下のバーにして、タブバーの裏のぼかしを幅のバーの上まで伸ばす
+            .bottomSafeAreaBar { rangeBar(domain: domain) }
             .onAppear { scrollX = domain.upperBound.addingTimeInterval(-visible) }
         }
     }
@@ -215,6 +215,8 @@ private struct MetricCard: View {
             if visibleLength >= 2 * definition.interval, series.values.lazy.compactMap({ $0 }).prefix(2).count == 2 {
                 chart(points)
                     .frame(height: 140)
+                    // グラフは横に送れる。**ここから引いたときはページをめくらない**
+                    .swipePagerExclusion()
                     // 幅が変わったら作り直す。作り直さないと、スクロールできない「全体」から
                     // 切り替えたときに、渡した位置を受け取らずデータの先頭に居座る
                     .id(visibleLength)
