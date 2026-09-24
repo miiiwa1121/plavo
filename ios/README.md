@@ -4,7 +4,7 @@ plavo の iOS 実装。技術スタックは Swift + SwiftUI + ARKit + Vision + 
 
 | ディレクトリ | 内容 | 状態 |
 |---|---|---|
-| [PlavoCore/](./PlavoCore/) | ドメイン層の Swift Package。UI にも AR にも依存しない | **動作する。77件のテストが通る** |
+| [PlavoCore/](./PlavoCore/) | ドメイン層の Swift Package。UI にも AR にも依存しない | **動作する。92件のテストが通る** |
 | PlavoApp/ | アプリ本体（タブ・AR・カメラ） | 未着手 |
 
 ## PlavoCore
@@ -27,6 +27,7 @@ swift test
 | `MetricCatalog.swift` | 育成のグラフに出す項目の定義（D44）。**項目を足すときはここに1行** |
 | `MetricSeries.swift` | 項目ごとの値の列・まとめ方・日長の計算・10分ごとの平均・同梱ファイルの読み込み |
 | `PhotoGridLayout.swift` | プロフィールの写真の並び（2本指で列が変わる）の配置の計算 |
+| `Social.swift` | 友達・日記の3区分・反応（D61〜D63）。公開範囲、どの日記に並ぶか・コメントと共有の可否、スタンプ（1人1個）、流すスタンプの数と時刻 |
 | `Talk.swift` | トーク（D59）。おうち・メンバー・チャットと、その規則（株は1つのおうちにだけ入る・履歴は参加した時点から・写真の知らせのまとめ方） |
 | `TimeSpan.swift` | 時間の長さ（分・時・日・週）の秒数。`86_400` のような数字を式に直接書かないため |
 
@@ -152,7 +153,9 @@ xcrun simctl launch <device> dev.plavo.PlavoApp -startTab 3 -openHousehold 1
 
 | 引数 | 効き目 |
 |---|---|
-| `-startDiaryPage <0〜1>` | 0 自分の日記 / 1 みんなの日記（`DiaryPage`） |
+| `-startDiaryPage <0〜2>` | 0 自分 / 1 友達 / 2 みんな（`DiaryPage`） |
+| `-openPublishedDiary YES` | 自分の日記のうち、公開した一番新しいページを開く（縦フィード）。**起動直後に1回だけ効く** |
+| `-playStampBurst YES` | 起動したページの先頭の、スタンプの付いたカードで、スタンプを1回だけ流す（D63）。流れる途中を画面写真で確かめるため |
 
 ### 実機が必要な部分
 

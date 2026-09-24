@@ -2,22 +2,27 @@ import PhotosUI
 import PlavoCore
 import SwiftUI
 
-/// 日記（D14 / D26 / L-15）。**自分の日記とみんなの日記の2ページ。**
+/// 日記（D14 / D26 / D62）。**「自分／友達／みんな」の3ページ。**
 ///
 /// 見出し「日記」の下の切り替え（`CapsuleTabBar`）か、横にスライドしてめくる。
+/// 見出しが「日記」なので、切り替えには「〇〇の日記」を付けない。
 ///
 /// **自分の日記**は1日1件。実際の日記帳と同じで、今日のページに書き足していく。
 /// 一覧は3列の正方形グリッド。タップするとその位置から縦フィードが開き、
 /// 上下にスクロールして前後の日記を続けて読める。
 ///
-/// **みんなの日記**は、ほかの人の日記の縦のタイムライン（`CommunityFeed`）。
+/// ページごとに公開範囲（非公開／友達／みんな）を選ぶ。既定は非公開。公開したページには、
+/// 友達と知らない人の反応（スタンプ・コメント）が付き、**数は自分にだけ見える**（D63）。
+///
+/// **友達**と**みんな**は、ほかの人の日記の縦のタイムライン（`CommunityFeed`）。みんなは匿名。
 struct DiaryTab: View {
     @Bindable var model: AppModel
     /// マスをタップすると、そのページから縦フィードへ進む
     @State private var path = NavigationPath()
     @State private var page: DiaryPage = Self.initialPage
+    @State private var launchHandled = false
 
-    /// 動作確認用。`-startDiaryPage 1` でみんなの日記から始める（ios/README.md）
+    /// 動作確認用。`-startDiaryPage 1` で友達、`2` でみんなから始める（ios/README.md）
     private static var initialPage: DiaryPage {
         DiaryPage(rawValue: UserDefaults.standard.integer(forKey: "startDiaryPage")) ?? .mine
     }
@@ -29,7 +34,8 @@ struct DiaryTab: View {
                 SwipePager(selection: $page, pages: DiaryPage.allCases) { page in
                     switch page {
                     case .mine: mine(width: proxy.size.width)
-                    case .everyone: CommunityFeed(model: model)
+                    case .friends: CommunityFeed(model: model, feed: .friends)
+                    case .everyone: CommunityFeed(model: model, feed: .everyone)
                     }
                 }
             }
@@ -39,7 +45,7 @@ struct DiaryTab: View {
                 CapsuleTabBar(
                     selection: $page,
                     items: DiaryPage.allCases.map { .init($0, title: $0.title) },
-                    itemWidth: 110
+                    itemWidth: 80
                 )
                 .padding(.bottom, 8)
             }
@@ -49,6 +55,15 @@ struct DiaryTab: View {
             // 一番上の画面の見出しは細くする（D56）
             .navigationTitle("日記")
             .navigationBarTitleDisplayMode(.inline)
+            // 動作確認用。`-openPublishedDiary YES` で、自分の日記のうち公開した一番新しいページを開く（ios/README.md）
+            .onAppear {
+                guard !launchHandled else { return }
+                launchHandled = true
+                guard UserDefaults.standard.bool(forKey: "openPublishedDiary"),
+                    let first = model.store.shownDiary.first(where: { $0.visibility != .personal })
+                else { return }
+                path.append(first.id)
+            }
             .navigationDestination(for: UUID.self) { id in
                 DiaryFeedView(model: model, startId: id)
             }
@@ -78,15 +93,28 @@ struct DiaryTab: View {
     }
 }
 
-/// 日記の2ページ。**番号は起動引数 `-startDiaryPage` の値**（ios/README.md）
+/// 日記の3ページ（D62）。**番号は起動引数 `-startDiaryPage` の値**（ios/README.md）
 enum DiaryPage: Int, CaseIterable, Hashable {
     case mine
+    case friends
     case everyone
 
+    /// 見出しが「日記」なので短くする。3つとも「〇〇の日記」にすると切り替えに対して長すぎる
     var title: String {
         switch self {
-        case .mine: "自分の日記"
-        case .everyone: "みんなの日記"
+        case .mine: "自分"
+        case .friends: "友達"
+        case .everyone: "みんな"
+        }
+    }
+}
+
+extension DiaryVisibility {
+    var symbol: String {
+        switch self {
+        case .personal: "lock.fill"
+        case .friends: "person.2.fill"
+        case .everyone: "globe"
         }
     }
 }
@@ -338,6 +366,8 @@ private struct DiaryCard: View {
     @State private var pickerItem: PhotosPickerItem?
     @State private var page = 0
     @State private var confirmDelete = false
+    /// 写真の上に流すスタンプ（D63）
+    @State private var burst = StampBurstState()
 
     /// 並べ替えの最中の状態。長押しで始まり、指を離すと終わる
     @State private var arrange: Arrangement?
@@ -369,6 +399,26 @@ private struct DiaryCard: View {
             VStack(alignment: .leading, spacing: 12) {
                 header(entry)
                 photos(entry)
+                    // 押されたスタンプを写真の上に流す。**写真の形で切る。**送る幅はカードの端まで広がっている
+                    .overlay {
+                        Color.clear
+                            .stampBurst(burst)
+                            .clipShape(Self.photoShape)
+                            .frame(height: Self.photoHeight)
+                            .frame(maxHeight: .infinity, alignment: .top)
+                    }
+                    // 公開したページだけ、ダブルタップで ❤️（D63）
+                    .simultaneousGesture(
+                        TapGesture(count: 2).onEnded { doubleTap() },
+                        including: FeedRules.showsReactions(entry.visibility) ? .all : .subviews)
+                // 公開したページにだけ、スタンプ・コメント・共有を並べる。**数は自分にだけ見える**（D63）
+                if FeedRules.showsReactions(entry.visibility) {
+                    ReactionBar(
+                        model: model, pageId: entryId, authorId: model.community.meId, feed: .mine,
+                        visibility: entry.visibility, onStamp: startBurst
+                    )
+                    .padding(.vertical, -6)
+                }
                 text(entry)
                 quote(entry)
             }
@@ -379,6 +429,9 @@ private struct DiaryCard: View {
             // 持ち上げた写真はカードの上に浮かせる。見出しのゴミ箱まで運べるように
             .overlay(alignment: .topLeading) { lifted }
             .onChange(of: pickerItem) { _, item in load(item) }
+            .task {
+                if await StampBurstState.claimLaunchDemo(model.community.board(of: entryId), in: .mine) { startBurst() }
+            }
         }
     }
 
@@ -390,6 +443,7 @@ private struct DiaryCard: View {
             // 株で分けない1日1ページの見出しには合わない
             Text(DateLabel.monthDay(entry.date))
                 .font(.caption.weight(.semibold))
+            visibilityMenu(entry)
             Spacer()
 
             // ゴミ箱は「+」の横。写真が無ければ消すものも無い
@@ -410,6 +464,50 @@ private struct DiaryCard: View {
                 Text("\(DiaryEntry.maxPhotosPerDay)枚まで")
                     .font(.caption2).foregroundStyle(.tertiary)
             }
+        }
+    }
+
+    /// 公開範囲（D62）。**ページごとに選ぶ。既定は非公開**
+    private func visibilityMenu(_ entry: DiaryEntry) -> some View {
+        Menu {
+            Picker(
+                "公開範囲",
+                selection: Binding(
+                    get: { self.entry?.visibility ?? .personal },
+                    set: {
+                        model.store.setVisibility($0, of: entryId)
+                        Haptics.tick()
+                    })
+            ) {
+                ForEach(DiaryVisibility.allCases) { visibility in
+                    Label(visibility.label, systemImage: visibility.symbol).tag(visibility)
+                }
+            }
+        } label: {
+            Label(entry.visibility.label, systemImage: entry.visibility.symbol)
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(.quaternary, in: Capsule())
+        }
+        .accessibilityLabel("公開範囲: \(entry.visibility.label)")
+    }
+
+    // MARK: - スタンプ
+
+    private func doubleTap() {
+        model.community.doubleTap(on: entryId)
+        Haptics.tap()
+        startBurst()
+    }
+
+    private func startBurst() {
+        let duration = burst.start(model.community.board(of: entryId))
+        let id = burst.id
+        Task {
+            try? await Task.sleep(for: .seconds(duration))
+            burst.finish(id)
         }
     }
 

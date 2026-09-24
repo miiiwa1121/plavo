@@ -240,6 +240,8 @@ public struct DiaryEntry: Codable, Sendable, Identifiable, Equatable {
     /// ページに並べるのは `diaryPhotos`、ギャラリーに並べるのは `galleryPhotos`
     public var photos: [DiaryPhoto]
     public let author: Author
+    /// 公開範囲（D62）。**既定は非公開**
+    public var visibility: DiaryVisibility
 
     /// ページに並べる写真。日記から外したものと、パラパラの写真・ムービーを除く
     public var diaryPhotos: [DiaryPhoto] { photos.filter(\.isInDiary) }
@@ -295,7 +297,8 @@ public struct DiaryEntry: Codable, Sendable, Identifiable, Equatable {
         text: String,
         quotedDialogue: String? = nil,
         photos: [DiaryPhoto] = [],
-        author: Author
+        author: Author,
+        visibility: DiaryVisibility = .personal
     ) {
         self.id = id
         self.plantId = plantId
@@ -306,5 +309,6 @@ public struct DiaryEntry: Codable, Sendable, Identifiable, Equatable {
         self.quotedDialogue = quotedDialogue
         self.photos = photos
         self.author = author
+        self.visibility = visibility
     }
 }

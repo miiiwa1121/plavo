@@ -492,6 +492,12 @@ final class PlantStore {
         diary[i].text = text
     }
 
+    /// 公開範囲を変える（D62）。既定は非公開
+    func setVisibility(_ visibility: DiaryVisibility, of id: UUID) {
+        guard let i = diary.firstIndex(where: { $0.id == id }) else { return }
+        diary[i].visibility = visibility
+    }
+
     /// 写真を足す。**上限はページ全体**（`DiaryEntry.maxPhotosPerDay`）。達していれば false を返す。
     ///
     /// カメラで撮った写真（`fromCamera`）は、さらに1株の撮影の上限（D54）にも掛かる

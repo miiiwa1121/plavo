@@ -36,8 +36,8 @@ final class AppModel {
     /// トーク（D59）。おうちごとのグループチャット。株と写真に起きたことが自動で流れる
     let talk: TalkStore
 
-    /// みんなの日記（L-15）。ほかの人の日記。架空の書き手の分を仕込む
-    let community = CommunityStore()
+    /// 友達・ほかの人の日記・日記への反応（D61〜D63）。架空の人の分を仕込む
+    let community: CommunityStore
 
     /// 展示に使う植物のプロファイル。種類が決まったら差し替える（D17-a）
     let profile: PlantProfile = .default
@@ -76,6 +76,7 @@ final class AppModel {
         let store = PlantStore()
         self.store = store
         talk = TalkStore(plants: store)
+        community = CommunityStore(plants: store)
 
         var errors: [String] = []
         do {
@@ -99,6 +100,8 @@ final class AppModel {
         store.seedUser()
         // おうちと家族の会話。株の筋書きに合わせるので、株を仕込んだあとに組む（D59）
         talk.seed()
+        // 友達とほかの人の日記。自分の仕込みの日記の一部を公開するので、日記を仕込んだあとに組む
+        community.seed()
         // ここから先に起きたことは、トークに流す（D59-c）
         store.onEvent = { [weak self] event in self?.talk.handle(event) }
 
@@ -227,6 +230,7 @@ final class AppModel {
         picker.reset()
         store.reset()
         talk.seed()
+        community.seed()
         soilMoisture = Self.initialSoilMoisture
         lastMoisture = Self.initialSoilMoisture
         consecutiveWatering = false

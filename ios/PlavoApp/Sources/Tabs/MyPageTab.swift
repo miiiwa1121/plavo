@@ -28,6 +28,7 @@ struct MyPageTab: View {
     /// アイコンに使う写真。選んだら切り抜き画面へ渡す
     @State private var avatarItem: PhotosPickerItem?
     @State private var editingName = false
+    @State private var addingFriend = false
     /// 入力中の名前。保存するまで本物には書かない
     @State private var draftName = ""
 
@@ -88,6 +89,7 @@ struct MyPageTab: View {
                     if !name.isEmpty { model.store.userName = name }
                 }
             }
+            .sheet(isPresented: $addingFriend) { AddFriendSheet(model: model) }
             // 絞り込みを変えた手応え。押して戻したときも同じ
             .sensoryFeedback(.tick, trigger: filter)
         }
@@ -126,7 +128,8 @@ struct MyPageTab: View {
                     .buttonStyle(.plain)
                     .accessibilityLabel("名前を変更")
                 }
-                Spacer()
+                friends
+                Spacer(minLength: 0)
             }
             HStack(spacing: 0) {
                 // 写真と動画は押すと絞り込む
@@ -140,6 +143,32 @@ struct MyPageTab: View {
         .padding(.horizontal, 16)
         .padding(.top, 8)
         .padding(.bottom, 16)
+    }
+
+    /// 友達の人数（D61）。押すと友達の一覧。
+    ///
+    /// **0人のときは数を出さず「友達を追加」にする。**一人で使っているだけの人に「友達0人」と見せない。
+    /// 他人のプロフィールを開けるのは友達どうしだけなので、0人と見えるのは自分だけ
+    @ViewBuilder
+    private var friends: some View {
+        let count = model.community.friendIds.count
+        if count == 0 {
+            Button { addingFriend = true } label: {
+                Label("友達を追加", systemImage: "person.badge.plus")
+                    .font(.subheadline.weight(.medium))
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(Color.accentColor)
+            .fixedSize()
+        } else {
+            NavigationLink {
+                FriendListView(model: model)
+            } label: {
+                FriendCountLabel(count: count)
+                    .fixedSize()
+            }
+            .buttonStyle(.plain)
+        }
     }
 
     /// 数を1つ。`filter` を渡したものは押せて、押すと絞り込む。
