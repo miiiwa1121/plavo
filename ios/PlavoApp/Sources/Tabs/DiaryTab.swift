@@ -16,10 +16,11 @@ struct DiaryTab: View {
     /// マスをタップすると、そのページから縦フィードへ進む
     @State private var path = NavigationPath()
     @State private var page: DiaryPage = Self.initialPage
-    /// 上の切り替えの高さ。中身をその下から始めるために測る
-    @State private var pickerHeight: CGFloat = 47
-    /// ページの中身が、画面の上端からどれだけずれて置かれているか。測って打ち消す（マイプラント詳細と同じ）
-    @State private var pageShift: CGFloat = 0
+    /// 横に引いている量。指に付いてページが動く
+    @State private var drag: CGFloat = 0
+    /// 引いている向き。**初めに大きく動いた向きで決め、指を離すまで変えない。**
+    /// 決めないと、縦に送っている最中の少しの横ぶれでページが動く
+    @State private var dragAxis: Axis?
 
     /// 動作確認用。`-startDiaryPage 1` でみんなの日記から始める（ios/README.md）
     private static var initialPage: DiaryPage {
@@ -28,39 +29,29 @@ struct DiaryTab: View {
 
     var body: some View {
         NavigationStack(path: $path) {
-            // **帯を敷かず、切り替えは中身の上に浮かせる**（D45。マイプラント詳細と同じ作り）。
-            // ページ形式の TabView は枠の内側しか描かないので、画面の端まで広げ、上下の余白は各ページに足し直す
+            // **ページ形式の TabView を使わない。**あれの中のスクロールには、見出しとタブバーの
+            // ぼかし（システムのもの）が掛からない。ほかのタブと同じぼかしにするため、
+            // 2ページを横に並べて指でずらす。どちらのページのスクロールも、見出しとタブバーに
+            // 直に接するので、システムのぼかしがそのまま掛かる
             GeometryReader { proxy in
-                let top = proxy.safeAreaInsets.top + pickerHeight
-                let bottom = proxy.safeAreaInsets.bottom + pageShift
-
-                TabView(selection: $page) {
-                    pageContent(mine, top: top, bottom: bottom)
-                        .tag(DiaryPage.mine)
-                    pageContent(CommunityFeed(model: model), top: top, bottom: bottom)
-                        .tag(DiaryPage.everyone)
+                let width = proxy.size.width
+                HStack(spacing: 0) {
+                    mine(width: width).frame(width: width)
+                    CommunityFeed(model: model).frame(width: width)
                 }
-                .tabViewStyle(.page(indexDisplayMode: .never))
-                .ignoresSafeArea()
-                // タブバーの裏のぼかし。ページ形式の TabView の中ではシステムのものが出ないので自前で敷く。
-                // **高さは画面の下端から 96pt。**プロフィール（システムのもの）の画面写真と並べて、
-                // タブバーの上端あたりから始まるようにそろえた（安全領域の高さから出すと 180pt 超になり、濃すぎた）
-                .bottomScrollEdgeFade(height: 96)
-                .overlay(alignment: .top) {
-                    CapsuleTabBar(
-                        selection: $page,
-                        items: DiaryPage.allCases.map { .init($0, title: $0.title) },
-                        itemWidth: 110
-                    )
-                    .padding(.bottom, 8)
-                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { pickerHeight = $0 }
-                    .padding(.top, proxy.safeAreaInsets.top)
-                    // ぼかしは画面の幅いっぱいに敷く
-                    .frame(maxWidth: .infinity)
-                    .scrollEdgeFade(bottomPadding: 8)
-                    .frame(maxHeight: .infinity, alignment: .top)
-                    .ignoresSafeArea()
-                }
+                .frame(width: width, alignment: .leading)
+                .offset(x: -CGFloat(page.rawValue) * width + drag)
+            }
+            .simultaneousGesture(swipe)
+            // 切り替えは見出しの下に置く。**`safeAreaBar` にする。**スクロールの端のぼかしが
+            // 切り替えの下まで伸び、見出しから切り替えまでが1つのバーとして見える
+            .topSafeAreaBar {
+                CapsuleTabBar(
+                    selection: $page,
+                    items: DiaryPage.allCases.map { .init($0, title: $0.title) },
+                    itemWidth: 110
+                )
+                .padding(.bottom, 8)
             }
             // 切り替えを押しても、スライドでめくっても同じ手応えにする
             .sensoryFeedback(.tick, trigger: page)
@@ -68,8 +59,6 @@ struct DiaryTab: View {
             // 一番上の画面の見出しは細くする（D56）
             .navigationTitle("日記")
             .navigationBarTitleDisplayMode(.inline)
-            // **ページの中ではなく、ここに置く。**ページ形式の TabView の中に置くと
-            // 「lazy なコンテナの中」として無視され、マスを押しても移らない（マイプラント詳細と同じ）
             .navigationDestination(for: UUID.self) { id in
                 DiaryFeedView(model: model, startId: id)
             }
@@ -78,23 +67,40 @@ struct DiaryTab: View {
 
     /// 自分の日記。3列のグリッド
     @ViewBuilder
-    private var mine: some View {
+    private func mine(width: CGFloat) -> some View {
         if model.store.diary.isEmpty && model.store.plants.isEmpty {
             emptyState.frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
-            DiaryGrid(model: model, path: $path)
+            DiaryGrid(model: model, path: $path, width: width)
         }
     }
 
-    /// 1ページ分。上下の余白を足し直し、ずれを測る（マイプラント詳細の `pageContent` と同じ）
-    private func pageContent(_ content: some View, top: CGFloat, bottom: CGFloat) -> some View {
-        content
-            .safeAreaPadding(.top, top)
-            .safeAreaPadding(.bottom, bottom)
-            .padding(.top, -pageShift)
-            .onGeometryChange(for: CGFloat.self) {
-                $0.frame(in: .global).minY - $0.safeAreaInsets.top
-            } action: { pageShift = $0 }
+    /// 横に引いてページをめくる。**縦のスクロールと同時に受ける**（`simultaneousGesture`）が、
+    /// 横に引いていると決まったときだけページを動かす
+    private var swipe: some Gesture {
+        DragGesture(minimumDistance: 12)
+            .onChanged { value in
+                let dx = value.translation.width
+                let dy = value.translation.height
+                if dragAxis == nil { dragAxis = abs(dx) > abs(dy) ? .horizontal : .vertical }
+                guard dragAxis == .horizontal else { return }
+                // 端のページから外へ引いたときは、重く（3分の1しか）付いてくる
+                let outward = (page == .mine && dx > 0) || (page == .everyone && dx < 0)
+                drag = outward ? dx / 3 : dx
+            }
+            .onEnded { value in
+                defer { dragAxis = nil }
+                guard dragAxis == .horizontal else { return }
+                // 指を離したあとの行き先（勢いを含む）で決める。画面の4分の1を越えたらめくる
+                let predicted = value.predictedEndTranslation.width
+                var next = page
+                if predicted < -80, page == .mine { next = .everyone }
+                if predicted > 80, page == .everyone { next = .mine }
+                withAnimation(.snappy) {
+                    page = next
+                    drag = 0
+                }
+            }
     }
 
     /// 「データがありません」とは書かない（原則3）
@@ -138,60 +144,45 @@ extension PlantStore {
 private struct DiaryGrid: View {
     @Bindable var model: AppModel
     @Binding var path: NavigationPath
+    /// 一覧の幅。**外（日記タブ）で測ったものを受け取る。**マスの一辺をここから決める
+    let width: CGFloat
 
     /// マスの間隔。詰めるほど「量」が伝わる
     private let spacing: CGFloat = 2
-
-    /// 一覧の幅。マスの一辺をここから決める
-    @State private var width: CGFloat = 0
-
-    private var columns: [GridItem] {
-        Array(repeating: GridItem(.flexible(), spacing: spacing), count: 3)
-    }
 
     var body: some View {
         // **一辺を先に決める。**`aspectRatio` に高さを導かせると、
         // マスが作られるたびに高さを測り直すことになり、
         // 送っている最中に内容の位置が細かくずれる
         //
-        // **幅は `GeometryReader` で包んで取らない。**包むと、上の余白が変わるたびに
-        //（見出しの高さなど）一覧全体が組み直される。
-        // 背景で幅だけを測り、変わったときにだけ組み直す
+        // **幅は自分で測らない。**外で分かっているものを使う（以前は背景で測り、測れるまで仮の中身を置いていた）
         let side = max(1, (width - spacing * 2) / 3)
 
+        // **`LazyVGrid` を使わず、3枚ずつの段を縦に重ねる。**2ページを横に並べる作り（DiaryTab）で
+        // `LazyVGrid` にすると、切り替えの下に 50pt ほどの空きができた（みんなの日記の `LazyVStack` には出ない。
+        // スクロールを上端に留めても変わらなかった）。段を `LazyVStack` に載せると出ない
+        let entries = model.store.shownDiary
+        let rows = stride(from: 0, to: entries.count, by: 3).map { Array(entries[$0..<min($0 + 3, entries.count)]) }
         ScrollView {
-            // 幅が測れるまでは並べない。一辺 1pt のまま並べると、全部のマスが
-            // 画面に収まってしまい、写真を一度に全部開くことになる。
-            // **代わりに透明な1行を置く。**中身が空だとスクロールそのものが幅 0 になり、
-            // 幅が測れず、いつまでも並ばなかった
-            if width <= 0 {
-                Color.clear.frame(maxWidth: .infinity, minHeight: 1)
-            } else {
-                LazyVGrid(columns: columns, spacing: spacing) {
-                    ForEach(model.store.shownDiary) { entry in
-                        DiaryTile(entry: entry, model: model)
-                            .frame(width: side, height: side)
-                            .onTapGesture { path.append(entry.id) }
+            LazyVStack(spacing: spacing) {
+                ForEach(rows, id: \.first?.id) { row in
+                    HStack(spacing: spacing) {
+                        ForEach(row) { entry in
+                            DiaryTile(entry: entry, model: model)
+                                .frame(width: side, height: side)
+                                .onTapGesture { path.append(entry.id) }
+                        }
+                        Spacer(minLength: 0)
                     }
                 }
-                // **見出しの薄い地に、1枚目を重ねない。**
-                // ガラスの帯は下を透かすので、詰めて置くと最初の行だけ
-                // 色がかぶって見える
-                .padding(.top, 16)
             }
-        }
-        // 幅は背景で受け取る。`onGeometryChange` は値が変わったときにしか呼ばれず、
-        // 幅が最初から変わらないここでは一度も届かなかった（一覧が空のままになった）
-        .background {
-            GeometryReader { proxy in
-                Color.clear
-                    .onAppear { width = proxy.size.width }
-                    .onChange(of: proxy.size.width) { _, new in width = new }
-            }
+            // **見出しの薄い地に、1枚目を重ねない。**
+            // ガラスの帯は下を透かすので、詰めて置くと最初の行だけ
+            // 色がかぶって見える
+            .padding(.top, 16)
         }
         // **`.animation` をスクロールに掛けない。**
         // 掛けると、送っている最中に作られるマスの配置まで動きの対象になる
-        // 縦フィードへの行き先は DiaryTab に置く（ページの中では効かない）
     }
 }
 
