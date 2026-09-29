@@ -71,11 +71,79 @@ final class DemoTourTests: XCTestCase {
         pause(2.0)
     }
 
+    // MARK: - カメラ
+
+    /// デモカメラ（`-demoCamera`・DemoCamera）に映す写真。Mac 上のパスをそのまま渡す。
+    /// シミュレータのアプリは Mac のファイルを読める
+    private static let cameraPhoto = URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent()
+        .appendingPathComponent("../../../video/assets/camera-plant.jpg")
+        .standardizedFileURL.path
+
+    /// シャッターの帯の高さ。選択中のボタンがいつも中央（x = 201）に来る
+    private static let shutterY: CGFloat = 725
+
+    /// カメラ — 植物を迎えて名前をつけ、話しかけてくるのを見て、1枚撮る
+    func testCameraTour() {
+        app.launchArguments = ["-showTouches", "YES", "-skipTitle", "YES", "-demoCamera", Self.cameraPhoto,
+            // 名前をつけて6秒後に水をあげたことにする。「のどが渇いたよ」→「生き返った」
+            "-demoWaterAfter", "6"]
+        app.launch()
+        // 誰も選ばれていないので、映像がぼけている（D52）
+        pause(2.0)
+
+        // シャッターを左へ2回滑らせて「迎える」に（撮る → ムービー → 迎える）
+        swipe(from: CGPoint(x: 300, y: Self.shutterY), to: CGPoint(x: 150, y: Self.shutterY), duration: 0.25)
+        pause(0.7)
+        swipe(from: CGPoint(x: 300, y: Self.shutterY), to: CGPoint(x: 150, y: Self.shutterY), duration: 0.25)
+        pause(1.0)
+        tapAt(CGPoint(x: 201, y: Self.shutterY))
+        // 撮った1枚で止まり、植物に枠。「この子でいい？」
+        pause(2.2)
+        tap(app.buttons["話しかける"])
+        // 「はじめまして。名前をつけてくれる？」と名前の入力
+        pause(2.4)
+        app.textFields["名前をつける"].typeText("まる")
+        pause(0.8)
+        tap(app.buttons["はじめる"])
+        // 挨拶のあと、土の状態に応じたセリフ（乾いている）。6秒後に水が入り、セリフが変わる
+        pause(10.0)
+
+        // 撮る。左下の枠に1枚が入る
+        tapAt(CGPoint(x: 201, y: Self.shutterY))
+        pause(2.0)
+        tapAt(CGPoint(x: 48, y: Self.shutterY))
+        pause(2.2)
+        swipe(from: CGPoint(x: 201, y: 420), to: CGPoint(x: 201, y: 780), duration: 0.3)
+        pause(2.5)
+    }
+
+    // MARK: - パラパラ
+
+    /// ひまりのパラパラを流す。一生ぶんの写真が1枚ずつめくれる
+    func testFlipbookTour() {
+        app.launchArguments = [
+            "-showTouches", "YES", "-skipTitle", "YES",
+            "-startTab", "1", "-openDetail", "YES", "-startDetailPage", "2", "-startGalleryFilter", "3",
+        ]
+        app.launch()
+        pause(1.5)
+        // 並びの先頭（いちばん新しい1枚）を開き、再生する。新しい1枚から押すと、いちばん古い1枚からめくる。
+        // 先頭の Image は画面外の暗幕なので、位置で押す
+        tapAt(CGPoint(x: 67, y: 240))
+        pause(1.5)
+        tap(app.buttons["パラパラ再生"])
+        pause(9.0)
+    }
+
     // MARK: - 操作
+
+    private func tapAt(_ point: CGPoint) {
+        coordinate(point).tap()
+    }
 
     private func tap(_ element: XCUIElement) {
         XCTAssertTrue(element.waitForExistence(timeout: 5), "見つからない: \(element)")
-        let f = element.frame
         element.tap()
     }
 
@@ -96,7 +164,6 @@ final class DemoTourTests: XCTestCase {
 
     private func pinch(_ element: XCUIElement, scale: CGFloat, velocity: CGFloat) {
         XCTAssertTrue(element.waitForExistence(timeout: 5))
-        let f = element.frame
         element.pinch(withScale: scale, velocity: velocity)
     }
 

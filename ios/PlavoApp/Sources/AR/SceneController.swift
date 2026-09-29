@@ -296,6 +296,10 @@ final class SceneController: NSObject {
 
     private weak var arView: ARView?
     private var model: AppModel?
+    /// デモカメラ（DemoCamera）の刻み。ARView の毎フレームの代わり
+    private var demoTimer: Timer?
+    /// デモカメラで撮った1枚と、その中の株の枠。「迎える」の確認に渡す
+    private(set) var demoCapturedBox: CGRect?
     /// 葉の塊の中ほど。しっぽが指す先
     private var plantWorld: SIMD3<Float>?
     /// 本体の置き場所。株から斜めにずらした点。**これも空間に固定する**
@@ -408,6 +412,7 @@ final class SceneController: NSObject {
     /// ARKit は撮影のためにカメラから改めて高解像度の1枚を取り出す。
     /// ただしカメラアプリのような計算写真処理（Deep Fusion 等）は入らない。
     func capturePhoto() async -> Data? {
+        if DemoCamera.isEnabled { return await captureDemoPhoto() }
         guard let session = arView?.session, !isCapturing else { return nil }
         isCapturing = true
         defer { isCapturing = false }
@@ -503,6 +508,10 @@ final class SceneController: NSObject {
     /// 展示では発熱とバッテリーが効くため、他のタブにいる間はカメラを回さない。
     /// **アンカーと検出結果は残す。**戻ったときに続きから見えるように。
     func pause() {
+        if DemoCamera.isEnabled {
+            stopDemo()
+            return
+        }
         // 録っている途中なら、そのムービーはやめる。フレームが来なくなり、終われなくなる
         recorder.cancel()
         arView?.session.pause()
@@ -514,6 +523,10 @@ final class SceneController: NSObject {
     /// **リセットは掛けない。**掛けるとトラッキングが初期化され、
     /// 吹き出しの位置が失われる。復帰に任せて、同じ空間の続きとして扱う。
     func resume() {
+        if DemoCamera.isEnabled {
+            startDemo()
+            return
+        }
         guard let arView, let config = configuration else { return }
         arView.session.run(config)
         isRunning = true
@@ -537,6 +550,10 @@ final class SceneController: NSObject {
     func adoptPlant(atNormalizedBox box: CGRect?) {
         isDetectionSuspended = false
         resetTracking()
+        if DemoCamera.isEnabled {
+            subject = .plant
+            return
+        }
         placeAnchor(forNormalizedBox: box ?? CGRect(x: 0.3, y: 0.25, width: 0.4, height: 0.5))
         subject = .plant
     }
@@ -544,6 +561,7 @@ final class SceneController: NSObject {
     /// アンカーを捨てて、もう一度検出からやり直す。検証で繰り返し試すときに使う
     func redetect() {
         subject = .none
+        demoCapturedBox = nil
         plantWorld = nil
         resetTracking()
         candidateSince = nil
@@ -1360,5 +1378,89 @@ private struct OneEuroFilter {
 extension simd_float4x4 {
     var translation: SIMD3<Float> {
         SIMD3<Float>(columns.3.x, columns.3.y, columns.3.z)
+    }
+}
+
+// MARK: - デモカメラ（紹介動画の撮影用・DemoCamera）
+
+extension SceneController {
+    /// ARView の代わりに刻みを回す。見つける判定と、吹き出しの位置の更新
+    fileprivate func startDemo() {
+        guard demoTimer == nil else { return }
+        isRunning = true
+        let timer = Timer(timeInterval: 1.0 / 60, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.demoTick() }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        demoTimer = timer
+    }
+
+    fileprivate func stopDemo() {
+        demoTimer?.invalidate()
+        demoTimer = nil
+        isRunning = false
+    }
+
+    private func demoTick() {
+        let now = DemoCamera.now
+        let screen = DemoCamera.screenSize
+
+        // **見つけるのは、株が選ばれていて1秒たってから**（D40-a・D51 と同じ条件）
+        if subject == .none {
+            guard !isDetectionSuspended, canDetectPlant else {
+                candidateSince = nil
+                return
+            }
+            if let since = candidateSince {
+                guard now - since >= DemoCamera.detectionDelay else { return }
+                candidateSince = nil
+                subject = .plant
+            } else {
+                candidateSince = now
+                return
+            }
+        }
+        guard subject == .plant else { return }
+
+        // 株の枠を、揺れと同じ式で画面に移す。吹き出しはそこから斜めに置く（D50）
+        let box = DemoCamera.project(DemoCamera.plantBox, screen: screen, at: now)
+        plantScreenPoint = CGPoint(x: box.midX, y: box.midY)
+        bubbleScale = 1
+        guard bubbleLayoutSize.width > 0 else {
+            bubbleScreenPoint = nil
+            return
+        }
+        if quadrant == nil {
+            let field = CGRect(origin: .zero, size: screen)
+                .inset(by: UIEdgeInsets(top: 72, left: 16, bottom: 168, right: 16))
+            quadrant = BubblePlacement.best(plant: box, size: bubbleLayoutSize, in: field, current: nil).quadrant
+        }
+        if let quadrant {
+            // **画面の内側に寄せる。**写真の株は画面の幅いっぱいに近く、斜めに置くと縁から出る。
+            // しっぽは株の中ほどを指したままなので、寄せても誰の言葉かは分かる
+            let field = CGRect(origin: .zero, size: screen)
+                .inset(by: UIEdgeInsets(top: 72, left: 16, bottom: 168, right: 16))
+            let ideal = BubblePlacement.center(for: quadrant, plant: box, size: bubbleLayoutSize)
+            let half = CGSize(width: bubbleLayoutSize.width / 2, height: bubbleLayoutSize.height / 2)
+            bubbleScreenPoint = CGPoint(
+                x: min(max(ideal.x, field.minX + half.width), field.maxX - half.width),
+                y: min(max(ideal.y, field.minY + half.height), field.maxY - half.height))
+        }
+    }
+
+    /// 撮影の代わりに、いま見えているとおりの1枚を作る。株の枠も一緒に覚える
+    fileprivate func captureDemoPhoto() async -> Data? {
+        guard !isCapturing else { return nil }
+        isCapturing = true
+        defer { isCapturing = false }
+        let now = DemoCamera.now
+        let screen = DemoCamera.screenSize
+        let box = DemoCamera.project(DemoCamera.plantBox, screen: screen, at: now)
+        demoCapturedBox = CGRect(
+            x: box.minX / screen.width, y: box.minY / screen.height,
+            width: box.width / screen.width, height: box.height / screen.height)
+        // 撮影には間がある。実機の手応えに近づける
+        try? await Task.sleep(for: .milliseconds(150))
+        return DemoCamera.snapshot(screen: screen, at: now)
     }
 }

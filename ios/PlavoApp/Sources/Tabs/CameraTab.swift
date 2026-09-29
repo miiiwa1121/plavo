@@ -64,14 +64,15 @@ struct CameraTab: View {
 
     var body: some View {
         ZStack {
-            if ARWorldTrackingConfiguration.isSupported {
+            // 紹介動画の撮影用のデモカメラ（DemoCamera）でも、ここから下はそのまま動かす
+            if ARWorldTrackingConfiguration.isSupported || DemoCamera.isEnabled {
                 // **誰も見ていないなら、映像を眠らせる。**
                 // 向けても何も起きない画面が、向ければ何か起きる画面と
                 // 同じ見え方をしていると、押せないことに気づけない。
                 //
                 // ぼかすのは映像だけ。**弧とシャッターは鮮明に残す**——
                 // この状態から出る道がそこにしかない
-                ARViewContainer(controller: scene)
+                cameraFeed
                     .ignoresSafeArea()
                     .blur(radius: unassigned ? 16 : 0)
                     .overlay {
@@ -193,6 +194,25 @@ struct CameraTab: View {
             line = ""
         }
         .onReceive(tick) { _ in dryIfMocked() }
+    }
+
+    /// カメラの映像。撮影用のデモカメラでは、写真を手持ちのように揺らして映す
+    @ViewBuilder
+    private var cameraFeed: some View {
+        if DemoCamera.isEnabled {
+            DemoCameraFeed()
+        } else {
+            ARViewContainer(controller: scene)
+        }
+    }
+
+    /// モックで水をあげる。説明員の隠し操作と、撮影用のデモカメラ（`-demoWaterAfter`）から呼ぶ
+    private func waterMock() {
+        // 水やりは数分で土に染みる。1ステップの跳ね上がりとして表現する
+        model.updateMoisture(min(100, model.soilMoisture + Self.mockWateringJump))
+        // **ここで触覚を鳴らさない。**帯域が `watered` に変わるので、
+        // セリフと一緒に `drink` が返る。押した瞬間にも鳴らすと二重になる
+        refreshLine(force: true)
     }
 
     // MARK: - 対象に応じた応答
@@ -385,9 +405,15 @@ struct CameraTab: View {
         }
         // **植物を探すのは裏で。**分類と前景マスクは古い端末で数百ミリ秒かかり、
         // ここで画面の仕事を止めると、シャッターを押したまま固まって見える
-        let analysis = await Task.detached(priority: .userInitiated) {
-            SceneController.analyze(image: image)
-        }.value
+        // デモカメラでは、撮った1枚の中の株の枠がもう分かっている
+        let analysis =
+            if DemoCamera.isEnabled {
+                SceneController.Analysis(box: scene.demoCapturedBox, labels: [], plantScore: 1)
+            } else {
+                await Task.detached(priority: .userInitiated) {
+                    SceneController.analyze(image: image)
+                }.value
+            }
         // 確認のあいだは、いま見ている相手を一度手放して検出も止める。
         // 止めないと、確かめている裏で映像の側が別の相手を決めてしまう
         scene.redetect()
@@ -681,11 +707,7 @@ struct CameraTab: View {
             diagnostics
 
             Button {
-                // 水やりは数分で土に染みる。1ステップの跳ね上がりとして表現する
-                model.updateMoisture(min(100, model.soilMoisture + Self.mockWateringJump))
-                // **ここで触覚を鳴らさない。**帯域が `watered` に変わるので、
-                // セリフと一緒に `drink` が返る。押した瞬間にも鳴らすと二重になる
-                refreshLine(force: true)
+                waterMock()
             } label: {
                 Label("水をあげる", systemImage: "drop.fill")
             }
@@ -763,6 +785,16 @@ struct CameraTab: View {
         addingPlant = false
         nameFieldFocused = false
         greetThenSettle()
+        // 撮影用のデモカメラ。のどが渇いた声を聞かせてから、水をあげたことにする
+        if let delay = DemoCamera.waterAfter {
+            Task {
+                try? await Task.sleep(for: .seconds(delay))
+                // たっぷりあげたことにする。モックの1回ぶん（+45）では、乾ききった土から
+                // 「ちょうどいい」までしか戻らず、水をもらった声（watered）にならない
+                model.updateMoisture(DemoCamera.wateredMoisture)
+                refreshLine(force: true)
+            }
+        }
     }
 
     /// AR の診断表示。吹き出しが出ないときの切り分けに使う。

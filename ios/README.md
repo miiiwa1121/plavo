@@ -162,10 +162,20 @@ xcrun simctl launch <device> dev.plavo.PlavoApp -startTab 3 -openHousehold 1
 | 引数 | 効き目 |
 |---|---|
 | `-showTouches YES` | 指の位置に丸を出す（`TouchIndicator`）。シミュレータの録画には指が映らないため |
+| `-demoCamera <写真のパス>` | **デモカメラ**（`DemoCamera`）。カメラの映像の代わりに写真を手持ちのように揺らして映し、株が選ばれていれば1秒で見つけたことにする。**シミュレータでもカメラタブが動く。**吹き出し・シャッター・迎える・名前の入力は本物 |
+| `-demoPlantBox x,y,w,h` | デモカメラの写真の中の株の枠（写真に対する割合・左上が原点）。写真を替えたときに渡す |
+| `-demoWaterAfter <秒>` | デモカメラで、名前をつけてからその秒数後に水をあげたことにする（水やり直後の帯まで上げる） |
+| `-skipTitle YES` | タイトル画面を出さない |
 
 ### 紹介動画の台本（UIテスト）
 
 `UITests/DemoTourTests.swift` は、紹介動画を撮るために画面を台本どおりに操作する UIテスト。**アプリの振る舞いを確かめるテストではない。**録画と組み合わせて `video/` の `npm run record` から流す。
+
+| テスト | 撮るもの |
+|---|---|
+| `testDemoTour` | マイプラント・日記・トーク・プロフィール |
+| `testCameraTour` | カメラ（デモカメラ）。迎える → 名前 → セリフ → 水 → 撮る |
+| `testFlipbookTour` | ひまりのパラパラ |
 
 ### 実機が必要な部分
 
