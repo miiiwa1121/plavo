@@ -40,6 +40,10 @@ targets:
     dependencies:
       - package: PlavoCore
         product: PlavoCore
+    # 紹介動画の操作を流すUIテストを、このスキームから走らせる（video/README.md）
+    scheme:
+      testTargets:
+        - PlavoAppUITests
     settings:
       base:
         # アプリのアクセント色を緑にする（D55）。タブバーの選択中も、
@@ -67,3 +71,16 @@ targets:
           NSAllowsLocalNetworking: true
         # 展示中に画面が消えないようにする
         UIRequiresFullScreen: true
+
+  # 紹介動画の撮影用（video/README.md）。画面の操作を台本どおりに流し、
+  # 押した時刻と位置を書き出す。アプリの振る舞いを確かめるテストではない
+  PlavoAppUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: UITests
+    dependencies:
+      - target: PlavoApp
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES

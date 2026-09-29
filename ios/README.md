@@ -157,6 +157,16 @@ xcrun simctl launch <device> dev.plavo.PlavoApp -startTab 3 -openHousehold 1
 | `-openPublishedDiary YES` | 自分の日記のうち、公開した一番新しいページを開く（縦フィード）。**起動直後に1回だけ効く** |
 | `-playStampBurst YES` | 起動したページの先頭の、スタンプの付いたカードで、スタンプを1回だけ流す（D63）。流れる途中を画面写真で確かめるため |
 
+紹介動画の撮影用の引数もある（[video/README.md](../video/README.md)）。
+
+| 引数 | 効き目 |
+|---|---|
+| `-showTouches YES` | 指の位置に丸を出す（`TouchIndicator`）。シミュレータの録画には指が映らないため |
+
+### 紹介動画の台本（UIテスト）
+
+`UITests/DemoTourTests.swift` は、紹介動画を撮るために画面を台本どおりに操作する UIテスト。**アプリの振る舞いを確かめるテストではない。**録画と組み合わせて `video/` の `npm run record` から流す。
+
 ### 実機が必要な部分
 
 **ARKit はシミュレータで動かない。**カメラタブは実機でしか確認できない。マイプラント・日記・トーク・プロフィールはシミュレータで確認できる。

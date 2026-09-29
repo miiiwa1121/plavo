@@ -24,7 +24,11 @@ struct PlavoApp: App {
                 }
             }
             // 展示中に画面が消えると来場者の体験が途切れる
-            .onAppear { UIApplication.shared.isIdleTimerDisabled = true }
+            .onAppear {
+                UIApplication.shared.isIdleTimerDisabled = true
+                // 紹介動画の撮影用。`-showTouches YES` のときだけ指の位置に丸を出す
+                TouchIndicator.installIfRequested()
+            }
         }
     }
 }
