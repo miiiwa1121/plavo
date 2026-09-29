@@ -12,7 +12,7 @@ final class DemoTourTests: XCTestCase {
     override func setUp() {
         continueAfterFailure = false
         app = XCUIApplication()
-        app.launchArguments = ["-startTab", "1", "-showTouches", "YES"]
+        app.launchArguments = ["-startTab", "1", "-showTouches", "YES", "-skipTitle", "YES"]
     }
 
     func testDemoTour() {

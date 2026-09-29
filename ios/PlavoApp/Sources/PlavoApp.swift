@@ -13,6 +13,7 @@ struct PlavoApp: App {
     /// **作るのは画面が出てから。**`@State` の初期値にすると、アプリが立ち上がる前に
     /// 仮写真を描く（UIKit を触る）ことになり、アクセント色（D55）が効かず全体が青に戻った
     @State private var model: AppModel?
+    @State private var showsTitle = !TitleScreen.isSkipped
 
     var body: some Scene {
         WindowGroup {
@@ -21,6 +22,15 @@ struct PlavoApp: App {
                     RootView(model: model)
                 } else {
                     Color.clear.onAppear { model = AppModel() }
+                }
+            }
+            // タイトルは一番上に重ねる。下で `AppModel` を作っている間も出ている
+            .overlay {
+                if showsTitle {
+                    TitleScreen {
+                        withAnimation(.easeOut(duration: 0.45)) { showsTitle = false }
+                    }
+                    .transition(.opacity)
                 }
             }
             // 展示中に画面が消えると来場者の体験が途切れる
