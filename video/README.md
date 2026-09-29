@@ -1,27 +1,31 @@
 # video — 紹介動画
 
-アプリの**操作の感じ**を伝える約30秒の動画。サービスの説明ではなく、実際の画面を触っている様子を見せる。縦型モニターに映すので縦長（1080×1920・30fps）。音はなし。
+アプリの**操作の感じ**を伝える動画。縦型モニターに映すので縦長（1080×1920・30fps）。[Remotion](https://www.remotion.dev/)（React で動画を組む道具）で作る。
 
-[Remotion](https://www.remotion.dev/)（React で動画を組む道具）で作る。
+| 版 | コンポジション | 長さ | 中身 | 音 |
+|---|---|---|---|---|
+| 60秒版 | `TourLong` | 60秒 | **カメラから始め、「出会う → 話す → 記録する → 共有する」の流れで見せる。**注目する場所へ寄る | BGM・効果音 |
+| 30秒版 | `Tour` | 約31秒 | マイプラント・日記・トーク・プロフィールの操作だけ | なし |
 
 ## 作り方の全体
 
 ```
-DemoTourTests（UIテスト）      ─ 台本どおりに画面を操作する
-   ＋ -showTouches YES          ─ アプリ自身が指の位置に丸を描く
+DemoTourTests（UIテスト）       ─ 台本どおりに画面を操作する
+   ＋ -showTouches YES           ─ アプリ自身が指の位置に丸を描く
+   ＋ -demoCamera <写真>          ─ カメラの映像の代わりに写真を映す（カメラの台本だけ）
         │
-xcrun simctl io recordVideo     ─ シミュレータの画面を録画する
-        │  npm run record
+xcrun simctl io recordVideo      ─ シミュレータの画面を録画する
+        │  npm run record [-- camera | flipbook]
         ▼
-public/tour.mp4                 ─ 操作の録画（約84秒・待ち時間を含む）
+public/tour.mp4                  ─ 各タブの操作（約84秒・待ち時間を含む）
+public/camera.mp4                ─ カメラ（約48秒）
+public/flipbook.mp4              ─ ひまりのパラパラ（約24秒）
         │
-src/cuts.ts                     ─ 録画のどこを使うか・上に出す一言
-        │  npm run render
+src/long/cuts.ts                 ─ 録画のどこを使うか・どこへ寄るか・どこで音を鳴らすか・一言
+        │  npm run render:long
         ▼
-out/plavo-tour.mp4              ─ 端末の枠・章の切り替え・一言を重ねた完成品
+out/plavo-tour-60s.mp4           ─ 完成品（60秒版）
 ```
-
-**カメラ（AR）は入っていない。**ARKit はシミュレータで動かないため。入れるなら、実機の画面収録を切り出しの1つとして足す。
 
 ## 手順
 
@@ -29,30 +33,90 @@ out/plavo-tour.mp4              ─ 端末の枠・章の切り替え・一言�
 cd video
 npm install
 
-# 1. 録画を撮る（ビルド込みで2〜3分）
-npm run record
+# 0. BGM を入れる（初回だけ・下の「音」を参照）
+#    public/audio/morning.mp3
+
+# 1. 録画を撮る（それぞれビルド込みで2〜3分）
+npm run record              # 各タブ → public/tour.mp4
+npm run record -- camera    # カメラ → public/camera.mp4
+npm run record -- flipbook  # パラパラ → public/flipbook.mp4
 
 # 2. 切り出しを録画に合わせる（撮り直したときだけ）
-#    src/cuts.ts の from / to を直す。Studio で見ながら直すと早い
+#    60秒版は src/long/cuts.ts、30秒版は src/cuts.ts の秒を直す。Studio で見ながら直すと早い
 npm run studio
 
 # 3. 書き出す
-npm run render      # → out/plavo-tour.mp4
+npm run render:long   # 60秒版 → out/plavo-tour-60s.mp4（4分ほど）
+npm run render        # 30秒版 → out/plavo-tour.mp4
 ```
 
 `npm run record` は iPhone 17 のシミュレータを使う。別の端末にするなら `DEVICE_ID=<UDID> npm run record`。ただし画面の大きさ（402×874pt）が変わると、台本の位置と動画の端末の縦横比がずれる。
+
+効果音を作り直すときは `npm run sfx`（`public/sfx/`）。
+
+## 60秒版の構成
+
+章は **BGM の小節の頭**から始まる（約118 BPM・1小節約2.04秒・`src/long/timeline.ts`）。章の中の切り出しが足りなければ、最後の切り出しを録画の先まで伸ばして埋める。
+
+| 時間 | 章 | 見せるもの |
+|---|---|---|
+| 0:00〜 | — | アプリのタイトルの絵（TitleScreen） |
+| 0:04〜 | 出会う | ぼけたカメラ → シャッターを「迎える」へ → 「この子でいい？」→ 名前「まる」→ 話しかけてくる |
+| 0:16〜 | 話す | 「くるしい」→ 水（しずくは動画の側で重ねる）→「気持ちいい」→ 撮る → 左下の1枚 |
+| 0:27〜 | 記録する | マイプラント → 育成のグラフ → ギャラリー → ひまりの一生をパラパラで |
+| 0:37〜 | 共有する | 日記（自分・友達・みんな）→ スタンプ 🌸 → ダブルタップで ❤️ → 家族のトーク |
+| 0:51〜 | — | 6つの画面（カメラ・育成・パラパラ／日記・トーク・プロフィール）を並べて引く |
+| 0:55〜 | — | タイトルの絵（文字は足さない） |
+
+**寄り**は切り出しごとに `zoom`（画面のポイントと倍率）で書く。注目する点をキャンバスの中ほどへ運ぶ倍率と位置を寄り先ごとに決め、そのあいだを約0.9秒（28コマ）のゆるい加減速で移る。
+
+- **拡大と移動を同じ進み方で動かす。**はじめは移動を拡大の途中で終わらせていたため、二段に動いて見えた
+- **倍率は比で補間する**（1→2 の途中を √2 にする）。差で補間すると、寄り始めが遅く、寄り終わりが速く感じる
+- 端末の縁はキャンバスの内側に入れない（注目する点が画面の端にあると、反対側に空きができるため）
+- 寄りと寄りの間は28コマ以上空ける。短いと前の寄りの途中で次が始まり、動きが途切れる
+
+## カメラの場面（デモカメラ）
+
+**ARKit はシミュレータで動かず、撮影に使える植物も手元にない。**そこでアプリに撮影用の「デモカメラ」を足した（`-demoCamera <写真のパス>`・`DemoCamera.swift`）。
+
+- カメラの映像の代わりに**1枚の写真を手持ちのように揺らして映し**、株が選ばれていれば1秒で「見つけた」ことにする
+- 作り物はこの2つ（映像と、見つけた判定）だけ。**吹き出し・シャッター・「迎える」・名前の入力・左下の1枚・弧はアプリの本物が動く**
+- 揺れと株の位置は同じ式で画面に移すので、吹き出しは株に付いてくる
+- 写真は [Pexels](https://www.pexels.com/photo/green-plant-with-white-ceramic-pot-1084188/) のホヤの鉢植え（Pexels のライセンス: 無料・商用可・クレジット不要）。カメラと同じ縦横比に切り抜いて `assets/camera-plant.jpg` に置いた
+- 動画ではカメラの場面に「※ カメラの映像はイメージです」と出す
+
+関係する起動引数は [ios/README.md](../ios/README.md) にある。
+
+## 音
+
+**BGM:「Morning」（しゃろう）** — [OpenTracks（旧 DOVA-SYNDROME）](https://opentracks.com/bgm/detail/2445)。ポップ／カントリーの明るい曲。
+
+| 規約の要点（OpenTracks 音源利用ライセンス・2026-09-29 に確認） | |
+|---|---|
+| 商用利用・動画の BGM・イベントでの利用 | 可 |
+| クレジット表記 | 不要 |
+| 作曲者の追加条件 | なし（サイトのライセンスに準拠） |
+| 禁止 | 音源の単体での再配布・販売、Content ID や JASRAC への登録、曲そのものの演奏（ライブ・カバーの公開）など |
+
+**音源はリポジトリに入れない**（単体での再配布にあたるため・`.gitignore`）。上のページの「ダウンロード」から**トラック1（非ループ）**を落とし、`public/audio/morning.mp3` に置く。曲を替えたら `src/long/timeline.ts` の拍（`BEAT` / `FIRST_BEAT`）を測り直す。
+
+**効果音**は外部の素材を使わず、`scripts/make-sfx.mjs` で波形を計算して作った（tap / shutter / pop / send / water / chime）。
 
 ## ファイル
 
 | ファイル | 内容 |
 |---|---|
-| `scripts/record.mjs` | ビルド → 録画開始 → 台本 → 録画停止 → 30fps に直す |
-| `src/cuts.ts` | 録画のどこを使うか・章・一言。**撮り直したら見直す** |
-| `src/timeline.ts` | 切り出しを動画の時間に並べる。はじめと終わりのロゴの長さ |
-| `src/Tour.tsx` | 画面の組み立て（端末の枠・章の切り替え・一言・ロゴ） |
+| `scripts/record.mjs` | ビルド → 録画開始 → 台本 → 録画停止 → 30fps に直す。台本が失敗しても録画は止める |
+| `scripts/make-sfx.mjs` | 効果音を作る |
+| `src/long/cuts.ts` | 60秒版の台本。切り出し・寄り・効果音・一言・章。**撮り直したら見直す** |
+| `src/long/timeline.ts` | 小節・切り出しの並び・寄りの補間・効果音の時刻 |
+| `src/long/TourLong.tsx` | 60秒版の画面の組み立て |
+| `src/cuts.ts` / `src/timeline.ts` / `src/Tour.tsx` | 30秒版 |
 | `src/theme.ts` | 色と文字 |
-| `../ios/PlavoApp/UITests/DemoTourTests.swift` | 操作の台本 |
-| `../ios/PlavoApp/Sources/Support/TouchIndicator.swift` | 指の丸。`-showTouches YES` のときだけ効く |
+| `assets/camera-plant.jpg` | デモカメラに映す写真 |
+| `../ios/PlavoApp/UITests/DemoTourTests.swift` | 操作の台本（`testDemoTour` / `testCameraTour` / `testFlipbookTour`） |
+| `../ios/PlavoApp/Sources/Support/TouchIndicator.swift` | 指の丸 |
+| `../ios/PlavoApp/Sources/AR/DemoCamera.swift` | デモカメラ |
 
 ## 判断したこと
 
@@ -62,10 +126,14 @@ npm run render      # → out/plavo-tour.mp4
 
 ### 待ちの間で切る
 
-UIテストは操作のたびにアプリが落ち着くのを待つので、録画には止まった時間が多い（約84秒）。**画面が止まっている間で切れば、つなぎ目は見えない。**そのため切り出しは細かく分けてある。
+UIテストは操作のたびにアプリが落ち着くのを待つので、録画には止まった時間が多い。**画面が止まっている間で切れば、つなぎ目は見えない。**そのため切り出しは細かく分けてある。
 
 ### ピンチは写真1枚の上で
 
 画面全体に向けてピンチすると、片方の指がタブバーに乗り、指を寄せる動きでタブの選択を引っ張ってしまった（プロフィールからトークへ移った）。中央の写真の上でつまむ。
 
 XCUITest のピンチは勢いが付き、大きくつまむと3列から10列近くまで進む。控えめにゆっくり1回だけつまむ（`scale: 0.6, velocity: -0.8`）。
+
+### 水やりは時間で起こす
+
+展示では説明員の隠し操作（モック）で水をやる。動画ではその操作を見せられないので、名前をつけてから6秒後に水をあげたことにする（`-demoWaterAfter 6`）。モックの1回ぶん（+45）では乾ききった土から「ちょうどいい」までしか戻らず、水をもらった声にならないので、水やり直後の帯（72%）まで上げる。

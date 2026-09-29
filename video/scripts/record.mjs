@@ -5,12 +5,13 @@
 // 3. 台本を流す。指の跡はアプリ自身が描く（-showTouches YES・TouchIndicator.swift）
 // 4. 録画を止め、Remotion で扱いやすい一定のフレームレートの mp4 に直す
 //
-// 出力: public/tour.mp4
+// 使い方: npm run record            … アプリの各タブ（testDemoTour）→ public/tour.mp4
+//         npm run record -- camera  … カメラ（testCameraTour・デモカメラ）→ public/camera.mp4
+//         npm run record -- flipbook … ひまりのパラパラ（testFlipbookTour）→ public/flipbook.mp4
 //
 // 撮り直したら、場面の切り出し位置（src/cuts.ts）を録画に合わせて見直すこと。
 // 台本の間が同じでも、ビルドや読み込みの具合で数百ミリ秒ずつ前後する
 //
-// 使い方: npm run record
 //   シミュレータを選ぶ: DEVICE_ID=<UDID> npm run record（既定は iPhone 17 の新しいもの）
 
 import { execFileSync, spawn } from "node:child_process";
@@ -21,7 +22,16 @@ import { fileURLToPath } from "node:url";
 const videoDir = join(dirname(fileURLToPath(import.meta.url)), "..");
 const iosDir = join(videoDir, "../ios/PlavoApp");
 const derivedData = join(iosDir, "build/dd");
-const rawPath = join(videoDir, "recordings/raw.mov");
+const takes = {
+  tour: { test: "testDemoTour", output: "public/tour.mp4" },
+  camera: { test: "testCameraTour", output: "public/camera.mp4" },
+  flipbook: { test: "testFlipbookTour", output: "public/flipbook.mp4" },
+};
+const takeName = process.argv[2] ?? "tour";
+const take = takes[takeName];
+if (!take) throw new Error(`知らない撮影です: ${takeName}（${Object.keys(takes).join(" / ")}）`);
+const rawPath = join(videoDir, `recordings/${takeName}.mov`);
+const outputPath = join(videoDir, take.output);
 const fps = 30;
 
 function run(cmd, args, options = {}) {
@@ -74,23 +84,32 @@ await new Promise((resolve, reject) => {
 });
 console.log("録画を始めました。台本を流します…");
 
+// **台本が途中で失敗しても録画は止める。**止めないと録画のプロセスが残り、次の撮影が始まらない
+const stopRecording = async () => {
+  if (recorder.exitCode !== null) return;
+  recorder.kill("SIGINT");
+  await new Promise((r) => recorder.on("exit", r));
+};
+
 await new Promise((resolve, reject) => {
   const test = spawn("xcodebuild", [...xcodebuildArgs, "test-without-building",
-    "-only-testing:PlavoAppUITests/DemoTourTests"], { cwd: iosDir, stdio: "ignore" });
+    `-only-testing:PlavoAppUITests/DemoTourTests/${take.test}`], { cwd: iosDir, stdio: "ignore" });
   test.on("exit", (code) => (code === 0 ? resolve() : reject(new Error(`台本が最後まで通りませんでした (${code})`))));
+}).catch(async (error) => {
+  await stopRecording();
+  throw error;
 });
 
 // 最後の画面を少し残してから止める
 await new Promise((r) => setTimeout(r, 1000));
-recorder.kill("SIGINT");
-await new Promise((r) => recorder.on("exit", r));
+await stopRecording();
 
 console.log("書き出し中…");
 // simctl の録画は画面が変わったときだけフレームを持つ（可変フレームレート）。一定に直す
 run("ffmpeg", ["-loglevel", "error", "-y", "-i", rawPath,
-  "-vf", `fps=${fps}`, "-c:v", "libx264", "-crf", "14", "-preset", "slow", "-pix_fmt", "yuv420p",
-  join(videoDir, "public/tour.mp4")]);
+  "-vf", `fps=${fps}`, "-c:v", "libx264", "-crf", "18", "-preset", "slow", "-pix_fmt", "yuv420p",
+  outputPath]);
 const duration = Number(run("ffprobe", ["-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0",
-  join(videoDir, "public/tour.mp4")]).trim());
+  outputPath]).trim());
 
-console.log(`できました: public/tour.mp4（${duration.toFixed(1)} 秒）`);
+console.log(`できました: ${take.output}（${duration.toFixed(1)} 秒）`);

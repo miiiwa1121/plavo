@@ -2,3 +2,5 @@ node_modules/
 out/
 # 撮影の生の録画。整えたもの（public/tour.mp4）だけを使う
 recordings/
+# BGM。OpenTracks の規約で音源の単体での再配布が禁じられているため、コミットしない（README の手順で入れる）
+public/audio/

@@ -7,7 +7,9 @@
     "studio": "remotion studio",
     "render": "remotion render Tour out/plavo-tour.mp4",
     "still": "remotion still Tour out/still.png",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "sfx": "node scripts/make-sfx.mjs",
+    "render:long": "remotion render TourLong out/plavo-tour-60s.mp4"
   },
   "dependencies": {
     "@remotion/cli": "4.0.529",
