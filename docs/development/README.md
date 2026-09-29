@@ -6,6 +6,7 @@
 |---|---|---|
 | [setup.md](./setup.md) | 環境構築と実行手順 | 初版 |
 | [device-setup.md](./device-setup.md) | **実機での動作確認**。ARはここでしか検証できない | 初版 |
+| [../../video/README.md](../../video/README.md) | **紹介動画**の作り方（シミュレータの録画 → Remotion）。縦長30秒 | 初版 |
 
 ## 現在の実装状況
 

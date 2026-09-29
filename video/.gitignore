@@ -1,0 +1,4 @@
+node_modules/
+out/
+# 撮影の生の録画。整えたもの（public/tour.mp4）だけを使う
+recordings/
