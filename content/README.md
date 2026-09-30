@@ -5,12 +5,12 @@ D34により展示は完全オフラインで動くため、**来場者が目に
 | ファイル | 本数 | 内容 | 使う場所 |
 |---|---|---|---|
 | [dialogues/greeting.json](./dialogues/greeting.json) | 10 | 検出直後の短い一言 | セクション2・4 |
-| [dialogues/moisture.json](./dialogues/moisture.json) | 52 | 土壌水分に応じたセリフ | セクション4 |
-| [dialogues/light.json](./dialogues/light.json) | 13 | 日照に応じたセリフ | セクション4 |
+| [dialogues/moisture.json](./dialogues/moisture.json) | 54 | 土壌水分に応じたセリフ | セクション4 |
+| [dialogues/light.json](./dialogues/light.json) | 14 | 日照に応じたセリフ。`sunlit`（日向に出た直後）は紹介動画の台本だけが使う | セクション4 |
 | [dialogues/environment.json](./dialogues/environment.json) | 8 | 気温・湿度・置き場所 | セクション4 |
 | [dialogues/growth.json](./dialogues/growth.json) | 15 | 元気さと成長 | セクション3・4 |
 | [dialogues/timeline.json](./dialogues/timeline.json) | 16 | 時系列パネル用 | セクション3 |
-| **合計** | **114** | | |
+| **合計** | **117** | | |
 
 ## セリフの規則
 
