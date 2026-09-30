@@ -24,7 +24,8 @@ const iosDir = join(videoDir, "../ios/PlavoApp");
 const derivedData = join(iosDir, "build/dd");
 const takes = {
   tour: { test: "testDemoTour", output: "public/tour.mp4" },
-  camera: { test: "testCameraTour", output: "public/camera.mp4" },
+  // センサーの値（D64）は server の中継サーバーとモックのガジェットが届ける。アプリは刺した瞬間に取りに来る
+  camera: { test: "testCameraTour", output: "public/camera.mp4", sensor: true },
   flipbook: { test: "testFlipbookTour", output: "public/flipbook.mp4" },
 };
 const takeName = process.argv[2] ?? "tour";
@@ -71,6 +72,25 @@ const xcodebuildArgs = [
 ];
 run("xcodebuild", [...xcodebuildArgs, "build-for-testing", "-quiet"], { cwd: iosDir, stdio: ["ignore", "ignore", "inherit"] });
 
+// センサーの中継サーバーとモックのガジェットを立ち上げる（カメラの撮影だけ）。
+// ガジェットは水をあげた直後（72%）・日向の明るさから始め、ほとんど乾かさない。気温・湿度・光量は毎回少し揺れる
+const serverDir = join(videoDir, "../server");
+const helpers = [];
+if (take.sensor) {
+  helpers.push(spawn("npx", ["tsx", "src/sensor/server.ts"], { cwd: serverDir, stdio: "ignore" }));
+  for (let i = 0; ; i++) {
+    const ok = await fetch("http://localhost:8787/health").then((r) => r.ok).catch(() => false);
+    if (ok) break;
+    if (i > 50) throw new Error("センサーの中継サーバーが立ち上がりませんでした");
+    await new Promise((r) => setTimeout(r, 200));
+  }
+  helpers.push(spawn("npx", ["tsx", "src/sensor/mock-gadget.ts",
+    "--percent", "72", "--drying", "0.05", "--lux", "18000", "--jitter"], { cwd: serverDir, stdio: ["pipe", "ignore", "ignore"] }));
+  console.log("センサーの中継サーバーとモックのガジェットを立ち上げました");
+}
+const stopHelpers = () => helpers.forEach((p) => p.exitCode === null && p.kill("SIGINT"));
+process.on("exit", stopHelpers);
+
 // 録画を始める
 mkdirSync(dirname(rawPath), { recursive: true });
 const recorder = spawn("xcrun", ["simctl", "io", device, "recordVideo", "--codec=h264", "--force", rawPath]);
@@ -97,8 +117,10 @@ await new Promise((resolve, reject) => {
   test.on("exit", (code) => (code === 0 ? resolve() : reject(new Error(`台本が最後まで通りませんでした (${code})`))));
 }).catch(async (error) => {
   await stopRecording();
+  stopHelpers();
   throw error;
 });
+stopHelpers();
 
 // 最後の画面を少し残してから止める
 await new Promise((r) => setTimeout(r, 1000));

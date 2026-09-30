@@ -4,7 +4,6 @@ import { acts, type ActName, type Clip, type SfxName, type Zoom } from "./cuts";
 export const FPS = 30;
 export const WIDTH = 1080;
 export const HEIGHT = 1920;
-export const TOTAL = 60 * FPS;
 
 // BGM「Morning」（しゃろう・OpenTracks）の拍。約118 BPM、最初の拍は 0.031 秒。
 // 録音を測って決めた。曲を替えたら測り直す
@@ -15,30 +14,69 @@ const BAR = BEAT * 4;
 /** その小節の頭のフレーム */
 export const barFrame = (bar: number) => Math.round((FIRST_BEAT + BAR * bar) * FPS);
 
+/** 全体の長さ。見ている人の目線が追いつくよう1分30秒にし、センサーの場面を足して1分40秒にした */
+export const TOTAL = 100 * FPS;
+/** はじめのタイトル（約4秒・小節の頭まで） */
 export const INTRO_END = barFrame(2);
-export const OVERVIEW_START = barFrame(25);
-export const OUTRO_START = barFrame(27);
+/** 画面を並べる場面。最後の章（共有する）のあと */
+export const OVERVIEW_START = barFrame(44);
+/** 終わりのタイトルは4秒 */
+export const OUTRO_START = TOTAL - 4 * FPS;
 
-export type PlacedClip = Clip & { act: ActName; start: number; length: number };
+export type PlacedClip = Clip & {
+  act: ActName;
+  start: number;
+  /** 動画の中での長さ（フレーム）。hold を含む */
+  length: number;
+  /** 最後のコマで止めておく長さ（フレーム） */
+  hold: number;
+};
 
 /**
- * 切り出しを章ごとに並べる。章は小節の頭から始め、足りなければ章の最後の切り出しを
- * 録画の先まで伸ばして埋める。はみ出したら、次の章を後ろへずらす（小節からは外れる）
+ * 切り出しを章ごとに並べる。章は小節の頭から始める。
+ *
+ * **章の長さに足りないぶんは、切り出しを伸ばして埋める。**まず、次の切り出しとのあいだ
+ * （録画から切り取っていた待ち時間や文字の入力）を戻す。録画のとおりに続くので、つなぎ目は増えない。
+ * それでも足りなければ、各切り出しの最後のコマで少しずつ止める。
+ * はみ出したら、次の章を後ろへずらす（小節からは外れる）
  */
 export const placed: PlacedClip[] = (() => {
+  const flat = acts.flatMap((act) => act.clips);
   const list: PlacedClip[] = [];
+  let index = 0;
   acts.forEach((act, i) => {
     const previousEnd = list.length ? list[list.length - 1].start + list[list.length - 1].length : 0;
-    let cursor = Math.max(barFrame(act.bar), previousEnd);
+    const actStart = Math.max(barFrame(act.bar), previousEnd);
     const actEnd = i + 1 < acts.length ? barFrame(acts[i + 1].bar) : OVERVIEW_START;
-    act.clips.forEach((clip, j) => {
+    const clips = act.clips.map((clip) => {
       const rate = clip.rate ?? 1;
-      let length = Math.round(((clip.to - clip.from) * FPS) / rate);
-      const isLast = j === act.clips.length - 1;
-      if (isLast && cursor + length < actEnd) {
-        length = actEnd - cursor;
-      }
-      list.push({ ...clip, to: clip.from + (length / FPS) * rate, act: act.name, start: cursor, length });
+      const next = flat[++index];
+      // 次の切り出しが同じ録画の続きなら、そのあいだを戻せる
+      const gap = next && next.source === clip.source && next.from >= clip.to ? next.from - clip.to : 0;
+      return {
+        clip,
+        rate,
+        base: Math.round(((clip.to - clip.from) * FPS) / rate),
+        capacity: Math.floor((gap * FPS) / rate),
+      };
+    });
+    const extra = Math.max(0, actEnd - actStart - clips.reduce((sum, c) => sum + c.base, 0));
+    const capacity = clips.reduce((sum, c) => sum + c.capacity, 0);
+    const fromGaps = Math.min(extra, capacity);
+    const grown = clips.map((c) => (capacity ? Math.floor((fromGaps * c.capacity) / capacity) : 0));
+    const holdTotal = extra - grown.reduce((sum, g) => sum + g, 0);
+    let cursor = actStart;
+    clips.forEach((c, j) => {
+      const hold = Math.floor(holdTotal / clips.length) + (j === clips.length - 1 ? holdTotal % clips.length : 0);
+      const length = c.base + grown[j] + hold;
+      list.push({
+        ...c.clip,
+        to: c.clip.from + ((c.base + grown[j]) / FPS) * c.rate,
+        act: act.name,
+        start: cursor,
+        length,
+        hold,
+      });
       cursor += length;
     });
   });
@@ -60,8 +98,8 @@ export type Camera = { scale: number; x: number; y: number };
 
 export const NEUTRAL_CAMERA: Camera = { scale: 1, x: 0, y: 0 };
 
-/** 寄る・引くのにかける時間。短いと二段に動いて見える */
-const ZOOM_FRAMES = 28;
+/** 寄る・引くのにかける時間（約1.3秒）。短いと二段に動いて見え、目線が追いつかない */
+const ZOOM_FRAMES = 40;
 /** ゆるい加減速（ease-in-out） */
 const ZOOM_EASE = Easing.bezier(0.42, 0, 0.58, 1);
 

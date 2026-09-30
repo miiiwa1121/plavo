@@ -9,7 +9,8 @@
     "still": "remotion still Tour out/still.png",
     "typecheck": "tsc --noEmit",
     "sfx": "node scripts/make-sfx.mjs",
-    "render:long": "remotion render TourLong out/plavo-tour-60s.mp4"
+    "render:long": "remotion render TourLong out/plavo-tour-long.mp4",
+    "render:wide": "remotion render TourLongWide out/plavo-tour-wide.mp4"
   },
   "dependencies": {
     "@remotion/cli": "4.0.529",

@@ -12,8 +12,11 @@ import {
   useCurrentFrame,
   useVideoConfig,
 } from "remotion";
+import { createContext, useContext } from "react";
 import { colors, font } from "../theme";
 import { actNames, overview, overviewCaption, sources } from "./cuts";
+import { landscape, portrait, type Layout } from "./layout";
+import { PresenterBubble, PresenterCharacter } from "./Presenter";
 import {
   FPS,
   INTRO_END,
@@ -32,22 +35,41 @@ import {
 } from "./timeline";
 
 // 録画は iPhone 17（402×874pt・1206×2622px）
-const SCREEN_WIDTH = 680;
-const SCREEN_HEIGHT = Math.round((SCREEN_WIDTH * 874) / 402);
-const BEZEL = 14;
-const SCREEN_RADIUS = Math.round(SCREEN_WIDTH * (55 / 402));
-const PHONE_LEFT = (1080 - SCREEN_WIDTH) / 2 - BEZEL;
-const PHONE_TOP = 340 - BEZEL;
-const PHONE_WIDTH = SCREEN_WIDTH + BEZEL * 2;
-const PHONE_HEIGHT = SCREEN_HEIGHT + BEZEL * 2;
-/** 寄ったとき、端末が覆っておく範囲の上端。ここより上は見出し */
-const COVER_TOP = 360;
-/** 寄ったとき、注目する点を持ってくる場所（キャンバスの座標） */
-const ZOOM_ANCHOR = { x: 540, y: 1120 };
+const screenHeightOf = (width: number) => Math.round((width * 874) / 402);
+
+/** 縦画面・横画面の置き場所（layout.ts）。組み立ては共通で、ここから読む */
+const LayoutContext = createContext<Layout>(portrait);
+const useLayout = () => useContext(LayoutContext);
+
+/** 端末の寸法（枠を含む） */
+function phoneOf(layout: Layout) {
+  const screenHeight = screenHeightOf(layout.screenWidth);
+  return {
+    screenHeight,
+    width: layout.screenWidth + layout.bezel * 2,
+    height: screenHeight + layout.bezel * 2,
+    radius: Math.round(layout.screenWidth * (55 / 402)),
+  };
+}
 
 const clamp = { extrapolateLeft: "clamp", extrapolateRight: "clamp" } as const;
 
-export const TourLong: React.FC = () => {
+/** 縦画面（1080×1920） */
+export const TourLong: React.FC = () => (
+  <LayoutContext.Provider value={portrait}>
+    <Tour />
+  </LayoutContext.Provider>
+);
+
+/** 横画面（1920×1080）。構成・時間・寄り先は縦画面と同じ */
+export const TourLongWide: React.FC = () => (
+  <LayoutContext.Provider value={landscape}>
+    <Tour />
+  </LayoutContext.Provider>
+);
+
+const Tour: React.FC = () => {
+  const layout = useLayout();
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
 
@@ -59,14 +81,14 @@ export const TourLong: React.FC = () => {
   return (
     <AbsoluteFill style={{ backgroundColor: colors.background, fontFamily: font, overflow: "hidden" }}>
       <AbsoluteFill
-        style={{ background: `radial-gradient(circle at 50% 58%, ${colors.glow} 0%, rgba(0,0,0,0) 55%)` }}
+        style={{ background: `radial-gradient(circle at ${layout.glow}, ${colors.glow} 0%, rgba(0,0,0,0) 55%)` }}
       />
 
       <div
         style={{
           position: "absolute",
-          left: PHONE_LEFT,
-          top: PHONE_TOP,
+          left: layout.phoneLeft,
+          top: layout.phoneTop,
           opacity: shown,
           transform: `translateY(${(1 - enter) * 320}px) scale(${1 - exit * 0.1})`,
         }}
@@ -93,26 +115,29 @@ export const TourLong: React.FC = () => {
  * 反対側に空きができる。端末がキャンバスより大きければ縁が外に出る範囲で、小さければ
  * キャンバスの内側に収まる範囲で止める
  */
-function cameraFor(target: ZoomTarget): Camera {
+function cameraFor(layout: Layout, target: ZoomTarget): Camera {
   if (target.scale <= 1.001) return NEUTRAL_CAMERA;
+  const phone = phoneOf(layout);
   const s = target.scale;
-  const fx = BEZEL + (target.x / 402) * SCREEN_WIDTH;
-  const fy = BEZEL + (target.y / 874) * SCREEN_HEIGHT;
+  const fx = layout.bezel + (target.x / 402) * layout.screenWidth;
+  const fy = layout.bezel + (target.y / 874) * phone.screenHeight;
   const fit = (value: number, origin: number, size: number, from: number, to: number) => {
     const a = from - origin; // 始まりの縁を from に合わせる移動
     const b = to - origin - size * s; // 終わりの縁を to に合わせる移動
     return Math.min(Math.max(value, Math.min(a, b)), Math.max(a, b));
   };
+  const { cover } = layout;
   return {
     scale: s,
-    x: fit(ZOOM_ANCHOR.x - PHONE_LEFT - fx * s, PHONE_LEFT, PHONE_WIDTH, 0, 1080),
-    y: fit(ZOOM_ANCHOR.y - PHONE_TOP - fy * s, PHONE_TOP, PHONE_HEIGHT, COVER_TOP, 1920),
+    x: fit(layout.zoomAnchor.x - layout.phoneLeft - fx * s, layout.phoneLeft, phone.width, cover.left, cover.right),
+    y: fit(layout.zoomAnchor.y - layout.phoneTop - fy * s, layout.phoneTop, phone.height, cover.top, cover.bottom),
   };
 }
 
 const ZoomedPhone: React.FC = () => {
+  const layout = useLayout();
   const frame = useCurrentFrame();
-  const camera = cameraAt(frame, cameraFor);
+  const camera = cameraAt(frame, (target) => cameraFor(layout, target));
   return (
     <div style={{ transformOrigin: "0 0", transform: `translate(${camera.x}px, ${camera.y}px) scale(${camera.scale})` }}>
       <Phone />
@@ -121,39 +146,51 @@ const ZoomedPhone: React.FC = () => {
 };
 
 const Phone: React.FC = () => {
+  const layout = useLayout();
+  const phone = phoneOf(layout);
   const first = placed[0];
   const last = placed[placed.length - 1];
   return (
     <div
       style={{
-        padding: BEZEL,
-        borderRadius: SCREEN_RADIUS + BEZEL,
+        padding: layout.bezel,
+        borderRadius: phone.radius + layout.bezel,
         backgroundColor: colors.bezel,
         boxShadow: "0 40px 90px rgba(20, 60, 30, 0.22), 0 8px 24px rgba(0,0,0,0.12)",
       }}
     >
       <div
         style={{
-          width: SCREEN_WIDTH,
-          height: SCREEN_HEIGHT,
-          borderRadius: SCREEN_RADIUS,
+          width: layout.screenWidth,
+          height: phone.screenHeight,
+          borderRadius: phone.radius,
           overflow: "hidden",
           backgroundColor: "white",
           position: "relative",
         }}
       >
         {placed.map((clip, i) => (
-          <Sequence key={i} from={clip.start} durationInFrames={clip.length} layout="none">
+          <Sequence key={i} from={clip.start} durationInFrames={clip.length - clip.hold} layout="none">
             <ClipVideo clip={clip} />
           </Sequence>
         ))}
+        {/* 章の長さに足りないぶん、最後のコマで止めておく（timeline.ts） */}
+        {placed
+          .filter((clip) => clip.hold > 0)
+          .map((clip, i) => (
+            <Sequence key={`hold-${i}`} from={clip.start + clip.length - clip.hold} durationInFrames={clip.hold} layout="none">
+              <Freeze frame={clip.length - clip.hold - 1}>
+                <ClipVideo clip={clip} />
+              </Freeze>
+            </Sequence>
+          ))}
         <Sequence from={0} durationInFrames={first.start} layout="none">
           <Freeze frame={0}>
             <ClipVideo clip={first} />
           </Freeze>
         </Sequence>
         <Sequence from={clipsEnd} layout="none">
-          <Freeze frame={last.length - 1}>
+          <Freeze frame={last.length - last.hold - 1}>
             <ClipVideo clip={last} />
           </Freeze>
         </Sequence>
@@ -162,6 +199,18 @@ const Phone: React.FC = () => {
           .map((clip, i) => (
             <Sequence key={`water-${i}`} from={frameOf(clip, clip.water!)} durationInFrames={40} layout="none">
               <WaterDrops />
+            </Sequence>
+          ))}
+        {placed
+          .filter((clip) => clip.sun !== undefined)
+          .map((clip, i) => (
+            <Sequence
+              key={`sun-${i}`}
+              from={frameOf(clip, clip.sun!)}
+              durationInFrames={clip.start + clip.length - frameOf(clip, clip.sun!)}
+              layout="none"
+            >
+              <SunBeams />
             </Sequence>
           ))}
       </div>
@@ -190,6 +239,7 @@ const ClipVideo: React.FC<{ clip: { source: PlacedClip["source"]; from: number; 
  */
 const WaterDrops: React.FC = () => {
   const frame = useCurrentFrame();
+  const size = useLayout().screenWidth / 680;
   const drops = [
     { x: 0.44, delay: 0 },
     { x: 0.53, delay: 5 },
@@ -204,8 +254,8 @@ const WaterDrops: React.FC = () => {
         return (
           <svg
             key={i}
-            width={34}
-            height={46}
+            width={34 * size}
+            height={46 * size}
             viewBox="0 0 34 46"
             style={{ position: "absolute", left: `${drop.x * 100}%`, top: `${y * 100}%`, opacity }}
           >
@@ -222,6 +272,43 @@ const WaterDrops: React.FC = () => {
   );
 };
 
+/**
+ * 日向の光の筋。右上から斜めに差し込み、ゆっくり揺れる。
+ * 映像の明るさと暖かさはアプリの側（DemoStage）で変えてある。ここでは「日が差した」ことを見せる
+ */
+const SunBeams: React.FC = () => {
+  const frame = useCurrentFrame();
+  const appear = interpolate(frame, [0, 24], [0, 1], { ...clamp, easing: Easing.out(Easing.quad) });
+  const beams = [
+    { offset: 0.1, width: 0.16, strength: 0.55 },
+    { offset: 0.36, width: 0.1, strength: 0.4 },
+    { offset: 0.56, width: 0.2, strength: 0.3 },
+  ];
+  return (
+    <AbsoluteFill style={{ pointerEvents: "none", overflow: "hidden", opacity: appear, mixBlendMode: "screen" }}>
+      {beams.map((beam, i) => {
+        const sway = Math.sin((frame + i * 20) / 38) * 0.02;
+        return (
+          <div
+            key={i}
+            style={{
+              position: "absolute",
+              top: "-30%",
+              left: `${(beam.offset + sway) * 100 + 40}%`,
+              width: `${beam.width * 100}%`,
+              height: "160%",
+              transform: "rotate(28deg)",
+              transformOrigin: "top center",
+              background: `linear-gradient(rgba(255, 226, 150, ${beam.strength}), rgba(255, 226, 150, 0) 75%)`,
+              filter: "blur(6px)",
+            }}
+          />
+        );
+      })}
+    </AbsoluteFill>
+  );
+};
+
 /** いま映っている切り出し。前後の間は最初・最後のものを返す */
 function clipAt(frame: number): PlacedClip {
   let found = placed[0];
@@ -229,31 +316,22 @@ function clipAt(frame: number): PlacedClip {
   return found;
 }
 
-// MARK: - 章と一言
+// MARK: - 章・語り手・案内役
 
-const Header: React.FC<{ opacity: number }> = ({ opacity }) => (
-  <>
-    {/* 寄った端末が上へはみ出しても、文字が読めるように地を敷く */}
-    <div
-      style={{
-        position: "absolute",
-        top: 0,
-        left: 0,
-        right: 0,
-        height: 330,
-        opacity,
-        background: `linear-gradient(${colors.background} 72%, rgba(242,245,239,0))`,
-      }}
-    />
-    <div style={{ opacity }}>
-      <ActBar />
-      <Caption />
-    </div>
-  </>
-);
-
-const PROGRESS_WIDTH = 880;
-const PROGRESS_TOP = 150;
+const Header: React.FC<{ opacity: number }> = ({ opacity }) => {
+  const layout = useLayout();
+  return (
+    <>
+      {/* 寄った端末が見出しの下へ入っても、文字が読めるように地を敷く */}
+      <div style={{ position: "absolute", opacity, ...layout.backdrop }} />
+      <div style={{ opacity }}>
+        {layout.header.steps.kind === "line" ? <ActBar /> : <ActStepper />}
+        <Narration />
+        <Presenter />
+      </div>
+    </>
+  );
+};
 
 /** 章ごとの始まりと終わり（フレーム） */
 const actSpans = actNames.map((name) => {
@@ -261,22 +339,31 @@ const actSpans = actNames.map((name) => {
   return { name, start: clips[0].start, end: clips[clips.length - 1].start + clips[clips.length - 1].length };
 });
 
+/** いまの章の番号と、章の中の進み具合（0〜1） */
+function actProgress(frame: number) {
+  const active = actSpans.findIndex((span) => frame >= span.start && frame < span.end);
+  const current = active >= 0 ? active : frame < actSpans[0].start ? 0 : actNames.length - 1;
+  const span = actSpans[current];
+  return { current, within: interpolate(frame, [span.start, span.end], [0, 1], clamp) };
+}
+
 /**
- * 話の進み。細い線の上に章の名前を並べ、動画の進みに合わせて線が緑に伸びる。
+ * 縦画面の上。細い線の上に章の名前を並べ、動画の進みに合わせて線が緑に伸びる。
  * **アプリの切り替えの部品（カプセルと塊）には似せない。**画面の中の UI と見分けがつかなくなる
  */
 const ActBar: React.FC = () => {
   const frame = useCurrentFrame();
-  const segment = PROGRESS_WIDTH / actNames.length;
+  const { steps } = useLayout().header;
+  if (steps.kind !== "line") return null;
+  const segment = steps.width / actNames.length;
   // 章ごとに線の4分の1を受け持ち、その章の中の進み具合だけ伸ばす
   const filled = actSpans.reduce(
     (sum, span) => sum + segment * interpolate(frame, [span.start, span.end], [0, 1], clamp),
     0,
   );
-  const active = actSpans.findIndex((span) => frame >= span.start && frame < span.end);
-  const current = active >= 0 ? active : frame < actSpans[0].start ? 0 : actNames.length - 1;
+  const { current } = actProgress(frame);
   return (
-    <div style={{ position: "absolute", top: 0, left: (1080 - PROGRESS_WIDTH) / 2, width: PROGRESS_WIDTH }}>
+    <div style={{ position: "absolute", top: 0, left: steps.left, width: steps.width }}>
       {actNames.map((name, i) => {
         const on = i === current;
         return (
@@ -284,11 +371,11 @@ const ActBar: React.FC = () => {
             key={name}
             style={{
               position: "absolute",
-              top: PROGRESS_TOP - 50,
+              top: steps.top - steps.fontSize - 20,
               left: segment * i,
               width: segment,
               textAlign: "center",
-              fontSize: 30,
+              fontSize: steps.fontSize,
               fontWeight: on ? 800 : 500,
               letterSpacing: 2,
               color: on ? colors.accentDeep : colors.subtle,
@@ -299,47 +386,139 @@ const ActBar: React.FC = () => {
           </div>
         );
       })}
+      <div style={{ position: "absolute", top: steps.top, width: steps.width, height: 4, borderRadius: 2, backgroundColor: "rgba(0,0,0,0.1)" }} />
+      <div style={{ position: "absolute", top: steps.top, width: filled, height: 4, borderRadius: 2, backgroundColor: colors.accent }} />
+    </div>
+  );
+};
+
+/**
+ * 横画面の左。章を縦に並べ、丸の横に名前を置き、丸と丸を縦線でつなぐ。
+ * 線は章の中の進みに合わせて、次の丸へ向けて緑に伸びる
+ */
+const ActStepper: React.FC = () => {
+  const { steps } = useLayout().header;
+  const frame = useCurrentFrame();
+  const { fps } = useVideoConfig();
+  if (steps.kind !== "stepper") return null;
+  const { left, top, gap, dot, fontSize } = steps;
+  const { current, within } = actProgress(frame);
+  const lineX = left + dot / 2 - 3;
+  const filled = gap * current + gap * within;
+  // 章に入ると名前が膨らみ、抜けると戻る
+  const grow = (i: number) => {
+    const span = actSpans[i];
+    const into = spring({ frame: frame - span.start, fps, config: { damping: 16, mass: 0.6 } });
+    const out = i + 1 < actSpans.length ? spring({ frame: frame - span.end, fps, config: { damping: 16, mass: 0.6 } }) : 0;
+    return into * (1 - out);
+  };
+  return (
+    <>
+      {/* 線（下地と、伸びる緑） */}
       <div
         style={{
           position: "absolute",
-          top: PROGRESS_TOP,
-          width: PROGRESS_WIDTH,
-          height: 4,
-          borderRadius: 2,
+          left: lineX,
+          top: top + dot / 2,
+          width: 6,
+          height: gap * (actNames.length - 1),
+          borderRadius: 3,
           backgroundColor: "rgba(0,0,0,0.1)",
         }}
       />
       <div
         style={{
           position: "absolute",
-          top: PROGRESS_TOP,
-          width: filled,
-          height: 4,
-          borderRadius: 2,
+          left: lineX,
+          top: top + dot / 2,
+          width: 6,
+          height: Math.min(filled, gap * (actNames.length - 1)),
+          borderRadius: 3,
           backgroundColor: colors.accent,
         }}
       />
-    </div>
+      {actNames.map((name, i) => {
+        const reached = i <= current;
+        const on = i === current;
+        // いまの章の丸は、入った瞬間に少し膨らむ
+        const pulse = on ? spring({ frame: frame - actSpans[i].start, fps, config: { damping: 10, mass: 0.5 } }) : 1;
+        const size = on ? dot * (1.1 + 0.25 * (1 - Math.abs(1 - pulse))) : dot;
+        return (
+          <div key={name}>
+            <div
+              style={{
+                position: "absolute",
+                left: left + dot / 2 - size / 2,
+                top: top + gap * i + dot / 2 - size / 2,
+                width: size,
+                height: size,
+                borderRadius: "50%",
+                boxSizing: "border-box",
+                backgroundColor: reached ? colors.accent : colors.background,
+                border: `5px solid ${reached ? colors.accent : "rgba(0,0,0,0.18)"}`,
+                boxShadow: on ? "0 0 0 8px rgba(52, 199, 89, 0.18)" : "none",
+              }}
+            />
+            <div
+              style={{
+                position: "absolute",
+                left: left + dot + 28,
+                top: top + gap * i + dot / 2 - fontSize * 0.68,
+                fontSize,
+                // いまの章の名前は大きく見せる。塊の大きさは変えず、文字だけを膨らませる
+                transform: `scale(${1 + 0.35 * grow(i)})`,
+                transformOrigin: "left center",
+                fontWeight: on ? 800 : 600,
+                letterSpacing: 3,
+                color: on ? colors.accentDeep : reached ? colors.text : colors.subtle,
+                opacity: on || reached ? 1 : 0.7,
+                whiteSpace: "nowrap",
+              }}
+            >
+              {name}
+            </div>
+          </div>
+        );
+      })}
+    </>
   );
 };
 
-const Caption: React.FC = () => {
-  const frame = useCurrentFrame();
+/**
+ * 同じ一言が続いている区間の始まり。**語り手とキャラクターで別々に数える。**
+ * 語り手が同じまま、キャラクターだけが話し始めることがある
+ */
+function runOf(frame: number, pick: (clip: PlacedClip) => string | undefined) {
   const current = clipAt(frame);
+  const text = pick(current);
   const index = placed.indexOf(current);
-  let runStart = current.start;
-  for (let i = index - 1; i >= 0 && placed[i].caption === current.caption; i--) runStart = placed[i].start;
-  const local = frame - runStart;
+  let since = current.start;
+  for (let i = index - 1; i >= 0 && pick(placed[i]) === text; i--) since = placed[i].start;
+  return { text, since };
+}
+
+/** 語り手の一言（使い方の説明）。縦画面は上の中央、横画面は左の列 */
+const Narration: React.FC = () => {
+  const { narration } = useLayout().header;
+  const frame = useCurrentFrame();
+  const { text, since } = runOf(frame, (clip) => clip.narration);
+  const shadowed = narration.shadow === true;
+  const local = frame - since;
   const opacity = interpolate(local, [0, 9], [0, 1], clamp);
-  const rise = interpolate(local, [0, 12], [22, 0], { ...clamp, easing: Easing.out(Easing.cubic) });
+  const rise = interpolate(local, [0, 12], [18, 0], { ...clamp, easing: Easing.out(Easing.cubic) });
   return (
     <div
+      lang="ja"
       style={{
         position: "absolute",
-        top: 200,
-        width: "100%",
-        textAlign: "center",
-        fontSize: 64,
+        top: narration.top,
+        left: narration.left,
+        width: narration.width,
+        textAlign: narration.align,
+        // 文節で折り返す（「迎えまし／ょう。」のような途中の折り返しを避ける）
+        wordBreak: "auto-phrase" as React.CSSProperties["wordBreak"],
+        fontSize: narration.fontSize,
+        lineHeight: 1.4,
         fontWeight: 700,
         letterSpacing: 2,
         color: colors.text,
@@ -347,19 +526,72 @@ const Caption: React.FC = () => {
         transform: `translateY(${rise}px)`,
       }}
     >
-      {current.caption}
+      {shadowed ? (
+        // 端末に少し重なっても読めるよう、文字の後ろにうっすら影を敷く
+        <span
+          style={{
+            display: "inline-block",
+            padding: "10px 22px",
+            borderRadius: 18,
+            backgroundColor: "rgba(242, 245, 239, 0.72)",
+            boxShadow: "0 10px 30px rgba(20, 40, 25, 0.16)",
+            backdropFilter: "blur(6px)",
+          }}
+        >
+          {text}
+        </span>
+      ) : (
+        text
+      )}
     </div>
+  );
+};
+
+/** 案内役。キャラクターの一言があるあいだだけ吹き出しで話し、無いときは黙って立っている */
+const Presenter: React.FC = () => {
+  const { presenter, bubble } = useLayout().header;
+  const frame = useCurrentFrame();
+  const { text, since } = runOf(frame, (clip) => clip.comment);
+  return (
+    <>
+      <div style={{ position: "absolute", left: presenter.left, top: presenter.top }}>
+        <PresenterCharacter width={presenter.width} talkingSince={text ? since : -1000} />
+      </div>
+      {text && (
+        <div style={{ position: "absolute", left: bubble.left, right: bubble.right, top: bubble.top, bottom: bubble.bottom }}>
+          <PresenterBubble
+            text={text}
+            since={since}
+            maxWidth={bubble.maxWidth}
+            minWidth={bubble.minWidth}
+            fontSize={bubble.fontSize}
+            tail={bubble.tail}
+            tailOffset={bubble.tailOffset}
+          />
+        </div>
+      )}
+    </>
   );
 };
 
 /** カメラの場面は作り物の映像（デモカメラ）なので、そう断っておく */
 const CameraNote: React.FC = () => {
+  const { note } = useLayout();
   const frame = useCurrentFrame();
   const current = clipAt(frame);
   const cameraShown = current.source === "camera" && frame >= INTRO_END - 12 && frame < clipsEnd;
   if (!cameraShown) return null;
   return (
-    <div style={{ position: "absolute", bottom: 28, width: "100%", display: "flex", justifyContent: "center" }}>
+    <div
+      style={{
+        position: "absolute",
+        bottom: note.bottom,
+        left: note.centerX - 400,
+        width: 800,
+        display: "flex",
+        justifyContent: "center",
+      }}
+    >
       <div
         style={{
           padding: "8px 22px",
@@ -376,16 +608,12 @@ const CameraNote: React.FC = () => {
   );
 };
 
-// MARK: - 4つ並べる
-
-const MINI_COLUMNS = 3;
-const MINI_ROWS = 2;
-const MINI_WIDTH = 300;
-const MINI_HEIGHT = Math.round((MINI_WIDTH * 874) / 402);
-const MINI_BEZEL = 8;
-const MINI_GAP = 32;
+// MARK: - 画面を並べる
 
 const Overview: React.FC = () => {
+  const layout = useLayout();
+  const { columns, rows, miniWidth, bezel, gap, captionTop, captionSize, gridTop } = layout.overview;
+  const miniHeight = screenHeightOf(miniWidth);
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
   if (frame < OVERVIEW_START - 6 || frame > OUTRO_START + 20) return null;
@@ -393,8 +621,8 @@ const Overview: React.FC = () => {
   // 全体をゆっくり引く
   const pullBack = interpolate(local, [0, OUTRO_START - OVERVIEW_START], [1.08, 1], clamp);
   const leave = interpolate(frame, [OUTRO_START - 4, OUTRO_START + 14], [1, 0], clamp);
-  const gridWidth = (MINI_WIDTH + MINI_BEZEL * 2) * MINI_COLUMNS + MINI_GAP * (MINI_COLUMNS - 1);
-  const gridHeight = (MINI_HEIGHT + MINI_BEZEL * 2) * MINI_ROWS + MINI_GAP * (MINI_ROWS - 1);
+  const gridWidth = (miniWidth + bezel * 2) * columns + gap * (columns - 1);
+  const gridHeight = (miniHeight + bezel * 2) * rows + gap * (rows - 1);
   const captionIn = interpolate(local, [4, 14], [0, 1], clamp);
 
   return (
@@ -402,10 +630,10 @@ const Overview: React.FC = () => {
       <div
         style={{
           position: "absolute",
-          top: 230,
+          top: captionTop,
           width: "100%",
           textAlign: "center",
-          fontSize: 58,
+          fontSize: captionSize,
           fontWeight: 700,
           letterSpacing: 2,
           color: colors.text,
@@ -418,13 +646,13 @@ const Overview: React.FC = () => {
       <div
         style={{
           position: "absolute",
-          left: (1080 - gridWidth) / 2,
-          top: 350,
+          left: (layout.width - gridWidth) / 2,
+          top: gridTop,
           width: gridWidth,
           height: gridHeight,
           display: "grid",
-          gridTemplateColumns: `repeat(${MINI_COLUMNS}, 1fr)`,
-          gap: MINI_GAP,
+          gridTemplateColumns: `repeat(${columns}, 1fr)`,
+          gap,
           transform: `scale(${pullBack})`,
         }}
       >
@@ -435,8 +663,8 @@ const Overview: React.FC = () => {
             <div
               key={i}
               style={{
-                padding: MINI_BEZEL,
-                borderRadius: MINI_WIDTH * (55 / 402) + MINI_BEZEL,
+                padding: bezel,
+                borderRadius: miniWidth * (55 / 402) + bezel,
                 backgroundColor: colors.bezel,
                 boxShadow: "0 24px 50px rgba(20, 60, 30, 0.2)",
                 opacity: appear,
@@ -445,9 +673,9 @@ const Overview: React.FC = () => {
             >
               <div
                 style={{
-                  width: MINI_WIDTH,
-                  height: MINI_HEIGHT,
-                  borderRadius: MINI_WIDTH * (55 / 402),
+                  width: miniWidth,
+                  height: miniHeight,
+                  borderRadius: miniWidth * (55 / 402),
                   overflow: "hidden",
                   position: "relative",
                   backgroundColor: "white",

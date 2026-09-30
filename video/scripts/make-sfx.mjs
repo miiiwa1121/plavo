@@ -110,6 +110,19 @@ const sounds = {
     [0, 0.14, 0.3].forEach((at, i) => sweep(b, at, 0.06, 500 + i * 80, 1300 + i * 120, 0.035, 0.45));
     return b;
   },
+  // センサーを土に刺す。やわらかく低い「とすっ」
+  insert: () => {
+    const b = silence(0.3);
+    sweep(b, 0, 0.1, 260, 110, 0.035, 0.6);
+    burst(b, 0, 0.06, 0.014, 0.12, 0.35, 13);
+    return b;
+  },
+  // 日向。明るい鈴が上へ4つ
+  sun: () => {
+    const b = silence(1.6);
+    [1046.5, 1318.5, 1568, 2093].forEach((f, i) => bell(b, i * 0.07, f, 0.3, 0.16));
+    return b;
+  },
   // 出会い・名前が決まった。鈴を2つ
   chime: () => {
     const b = silence(1.8);
