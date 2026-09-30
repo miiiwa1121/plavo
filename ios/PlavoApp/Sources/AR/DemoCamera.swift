@@ -33,15 +33,64 @@ enum DemoCamera {
         return CGRect(x: 0.18, y: 0.43, width: 0.68, height: 0.30)
     }()
 
-    /// 名前をつけてから、水をあげたことにするまでの秒数。`-demoWaterAfter 8` のように渡す。
-    /// 展示では説明員の隠し操作で水をやる（モック）。動画ではそれを見せられないので、時間で起こす
-    static let waterAfter: TimeInterval? = {
-        let value = UserDefaults.standard.double(forKey: "demoWaterAfter")
-        return value > 0 ? value : nil
-    }()
+    /// 名前をつけたあとの流れを台本どおりにする。`-demoScript YES` のときだけ（`script`）
+    static var isScripted: Bool { isEnabled && UserDefaults.standard.bool(forKey: "demoScript") }
 
-    /// 水をあげたことにしたときの土の水分。水やり直後の帯（60〜）に入れる
-    static let wateredMoisture: Double = 72
+    /// 名前をつけたあとの台本。**動画の撮影のときだけ、セリフの順番を決めておく。**
+    ///
+    /// 普段のセリフは帯域の中からランダムに選ぶ。動画で「……こわい」のような暗い一言が
+    /// 出ないよう、順番を決める。**言うことはセリフ集にある本物**（`line` は帯域に含まれていること）。
+    ///
+    /// 展示では水やりは説明員の隠し操作、日向は株を動かすことで起きる。動画ではどちらも
+    /// 見せられないので、時間で起こす。時刻は名前をつけた瞬間からの秒
+    static let script: [ScriptStep] = [
+        .init(at: 0, moisture: nil, light: nil, line: .greeting("やあ")),
+        .init(at: 1.2, moisture: 15, light: nil, line: .moisture("thirsty", "お水欲しいな")),
+        .init(at: 5.2, moisture: 72, light: nil, line: .moisture("watered", "気持ち良い！ありがとう")),
+        .init(at: 9.2, moisture: nil, light: -0.6, line: .light("insufficient", "もう少しだけ日向ぼっこしたい")),
+        .init(at: 13.2, moisture: nil, light: 1, line: .light("sunlit", "あったかい、ありがとう")),
+        // センサーを鉢に刺す（D64）。刺さったところで中継サーバーから値を取り始める
+        .init(at: 17.2, moisture: nil, light: nil, line: nil, insertSensor: true),
+    ]
+
+    struct ScriptStep {
+        enum Line {
+            case greeting(String)
+            /// 帯域の key と、その中のセリフ
+            case moisture(String, String)
+            case light(String, String)
+        }
+
+        let at: TimeInterval
+        /// 土の水分をこの値にする（水をあげた・乾いている）
+        let moisture: Double?
+        /// 映像の明るさ（`DemoStage.light`）。-1 で日陰、1 で日向
+        let light: Double?
+        let line: Line?
+        /// センサーを鉢に刺す（`DemoStage.sensorDrop`）
+        var insertSensor = false
+    }
+
+    // MARK: - センサー（D64）
+
+    /// 鉢に刺すセンサーの切り抜き（透過 PNG）。`-demoSensor <パス>`。写真と同じくアプリには同梱しない
+    static let sensorImage: UIImage? = UserDefaults.standard.string(forKey: "demoSensor")
+        .flatMap { $0.isEmpty ? nil : UIImage(contentsOfFile: $0) }
+
+    /// 刺すセンサーのガジェットID。撮影では `server` のモックのガジェットが送る（既定の ID）
+    static let gadgetId = "gadget-001"
+
+    /// 刺さっているときのセンサーの置き場所（写真に対する割合）。
+    /// 横の中心と幅、下端。下端は鉢のふち（`potRimY`）より下にあり、そこから下は鉢に隠れる
+    static let sensorCenterX: CGFloat = 0.56
+    static let sensorWidth: CGFloat = 0.22
+    static let sensorBottom: CGFloat = 0.742
+    /// 鉢のふちの高さ（写真に対する割合）。センサーはここより下を描かない（土に刺さって見える）
+    static let potRimY: CGFloat = 0.712
+    /// 刺す前、どれだけ上から降りてくるか（写真の高さに対する割合）
+    static let sensorDropHeight: CGFloat = 0.16
+    /// 刺す動きの長さ
+    static let sensorDropDuration: TimeInterval = 0.9
 
     /// 株の全体が入ってから見つけるまでの間（D51 と同じ1秒）
     static let detectionDelay: TimeInterval = 1.0
@@ -59,7 +108,7 @@ enum DemoCamera {
     }
 
     /// 写真を画面いっぱいに切り抜いたときの、写真の置き場所（揺れの前）
-    private static func fill(_ screen: CGSize) -> CGRect {
+    static func fill(_ screen: CGSize) -> CGRect {
         guard let size = image?.size, size.width > 0, size.height > 0 else {
             return CGRect(origin: .zero, size: screen)
         }
@@ -110,24 +159,104 @@ enum DemoCamera {
     }
 }
 
+/// デモカメラの映像の明るさ。台本（`DemoCamera.script`）が動かす
+@MainActor
+@Observable
+final class DemoStage {
+    static let shared = DemoStage()
+    /// -1 で日陰（暗く青く）、0 でそのまま、1 で日向（明るく暖かく、右上から光が差す）
+    var light: Double = 0
+    /// センサーの刺さり具合。0 でまだ無い（上にいて見えない）、1 で鉢に刺さっている
+    var sensorDrop: Double = 0
+}
+
 /// デモカメラの映像。写真を手持ちのように揺らして映す
 struct DemoCameraFeed: View {
+    private var stage = DemoStage.shared
+
     var body: some View {
         TimelineView(.animation) { context in
             let (offset, scale) = DemoCamera.sway(at: context.date.timeIntervalSinceReferenceDate)
             GeometryReader { proxy in
                 if let image = DemoCamera.image {
-                    Image(uiImage: image)
-                        .resizable()
-                        .scaledToFill()
-                        .frame(width: proxy.size.width, height: proxy.size.height)
-                        .scaleEffect(scale)
-                        .offset(offset)
-                        .clipped()
+                    // 写真とセンサーを同じ置き場所で組んでから揺らす。センサーも写真と一緒に揺れる
+                    let placed = DemoCamera.fill(proxy.size)
+                    ZStack(alignment: .topLeading) {
+                        Image(uiImage: image)
+                            .resizable()
+                            .frame(width: placed.width, height: placed.height)
+                            .offset(x: placed.minX, y: placed.minY)
+                        if let sensor = DemoCamera.sensorImage {
+                            InsertedSensor(image: sensor, photo: placed, drop: stage.sensorDrop)
+                        }
+                    }
+                    .frame(width: proxy.size.width, height: proxy.size.height, alignment: .topLeading)
+                    .scaleEffect(scale)
+                    .offset(offset)
+                    .clipped()
+                    .modifier(Sunlight(light: stage.light))
                 } else {
                     Color.black
                 }
             }
         }
+    }
+}
+
+/// 鉢に刺すセンサー。上から降りてきて、鉢のふちから下は隠れる（土に刺さって見える）
+private struct InsertedSensor: View, Animatable {
+    let image: UIImage
+    let photo: CGRect
+    var drop: Double
+
+    nonisolated var animatableData: Double {
+        get { drop }
+        set { drop = newValue }
+    }
+
+    var body: some View {
+        let width = photo.width * DemoCamera.sensorWidth
+        let height = width * image.size.height / max(1, image.size.width)
+        let bottom = photo.minY + photo.height * (DemoCamera.sensorBottom - DemoCamera.sensorDropHeight * (1 - drop))
+        let rim = photo.minY + photo.height * DemoCamera.potRimY
+        Image(uiImage: image)
+            .resizable()
+            .frame(width: width, height: height)
+            .shadow(color: .black.opacity(0.18), radius: 6, y: 3)
+            .position(x: photo.minX + photo.width * DemoCamera.sensorCenterX, y: bottom - height / 2)
+            .opacity(min(1, drop * 4))
+            // 鉢のふちから下は描かない
+            .mask(alignment: .top) { Rectangle().frame(height: rim) }
+            .allowsHitTesting(false)
+    }
+}
+
+/// 日向と日陰の見え方。**映像にだけ掛ける。**吹き出しやシャッターの色は変えない
+///
+/// 明るさ・彩度・不透明度は SwiftUI がそのまま補間するので、`withAnimation` で変えればなめらかに移る
+private struct Sunlight: ViewModifier {
+    let light: Double
+
+    func body(content: Content) -> some View {
+        let sun = max(0, light)
+        let shade = max(0, -light)
+        content
+            // 全体を明るくしすぎない。白い壁が飛んで、日差しではなく露出の上げすぎに見える
+            .brightness(0.03 * sun - 0.08 * shade)
+            .saturation(1 + 0.15 * sun - 0.15 * shade)
+            .overlay {
+                // 暖かい色を重ねる。日陰では青みを重ねる
+                Color(red: 1, green: 0.66, blue: 0.25).opacity(0.3 * sun).blendMode(.softLight)
+                Color(red: 0.3, green: 0.4, blue: 0.7).opacity(0.18 * shade).blendMode(.softLight)
+            }
+            .overlay {
+                // 右上の外から差し込む、黄金色の光
+                RadialGradient(
+                    colors: [Color(red: 1, green: 0.84, blue: 0.5).opacity(0.6 * sun), .clear],
+                    center: UnitPoint(x: 1.05, y: -0.05), startRadius: 0, endRadius: 460
+                )
+                .blendMode(.screen)
+            }
+            .allowsHitTesting(false)
     }
 }

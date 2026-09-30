@@ -80,14 +80,28 @@ final class DemoTourTests: XCTestCase {
         .appendingPathComponent("../../../video/assets/camera-plant.jpg")
         .standardizedFileURL.path
 
+    /// 鉢に刺すセンサーの切り抜き（D64）
+    private static let sensorPhoto = URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent()
+        .appendingPathComponent("../../../video/assets/sensor.png")
+        .standardizedFileURL.path
+
     /// シャッターの帯の高さ。選択中のボタンがいつも中央（x = 201）に来る
     private static let shutterY: CGFloat = 725
 
     /// カメラ — 植物を迎えて名前をつけ、話しかけてくるのを見て、1枚撮る
     func testCameraTour() {
         app.launchArguments = ["-showTouches", "YES", "-skipTitle", "YES", "-demoCamera", Self.cameraPhoto,
-            // 名前をつけて6秒後に水をあげたことにする。「のどが渇いたよ」→「生き返った」
-            "-demoWaterAfter", "6"]
+            // 名前をつけたあとは台本どおりに話す（DemoCamera.script）。
+            // お水欲しいな → 水 → 気持ち良い！ありがとう → 日向ぼっこしたい → 日向 → あったかい、ありがとう
+            "-demoScript", "YES",
+            // センサーを刺したら、Mac で動かしている中継サーバー（server の npm run sensor）から値を取る。
+            // 値はモックのガジェットが送る（video/scripts/record.mjs が起動する）
+            "-demoSensor", Self.sensorPhoto,
+            "-sensorBaseURL", "http://localhost:8787",
+            // つまみは縦の真ん中から始める（前に動かした置き場所を持ち越さない）
+            "-sensorHandleOffset", "0",
+        ]
         app.launch()
         // 誰も選ばれていないので、映像がぼけている（D52）
         pause(2.0)
@@ -106,8 +120,19 @@ final class DemoTourTests: XCTestCase {
         app.textFields["名前をつける"].typeText("まる")
         pause(0.8)
         tap(app.buttons["はじめる"])
-        // 挨拶のあと、土の状態に応じたセリフ（乾いている）。6秒後に水が入り、セリフが変わる
-        pause(10.0)
+        // 台本は名前をつけてから13.2秒で最後のセリフまで進む。言い終わりを少し見せる
+        // 台本は名前をつけてから13.2秒で「あったかい、ありがとう」、17.2秒でセンサーを刺す。
+        // 刺さって1秒ほどで値が届き始める
+        pause(19.5)
+
+        // 右端のつまみを左へ引いて、センサーの枠を開く（D64）。値を見せてから、右へ払って閉じる
+        let handle = app.descendants(matching: .any)["センサーの値"]
+        XCTAssertTrue(handle.waitForExistence(timeout: 5), "センサーのつまみが見つからない")
+        let grip = handle.frame
+        swipe(from: CGPoint(x: grip.midX, y: grip.midY), to: CGPoint(x: grip.midX - 230, y: grip.midY), duration: 0.45)
+        pause(5.0)
+        swipe(from: CGPoint(x: 200, y: 437), to: CGPoint(x: 395, y: 437), duration: 0.4)
+        pause(1.8)
 
         // 撮る。左下の枠に1枚が入る
         tapAt(CGPoint(x: 201, y: Self.shutterY))

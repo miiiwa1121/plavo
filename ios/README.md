@@ -49,7 +49,7 @@ server/fixtures/sensors/*.json
 
 ### セリフのプールとの結びつき
 
-`DialogueBank` は `content/dialogues/` を読む。テストは**本数が114本であること**を検証している。`server` の `npm run check:dialogues` が数える本数と一致するため、片方だけ更新されたら気づける。
+`DialogueBank` は `content/dialogues/` を読む。テストは**本数が117本であること**を検証している。`server` の `npm run check:dialogues` が数える本数と一致するため、片方だけ更新されたら気づける。
 
 ## 設計上の判断
 
@@ -164,8 +164,13 @@ xcrun simctl launch <device> dev.plavo.PlavoApp -startTab 3 -openHousehold 1
 | `-showTouches YES` | 指の位置に丸を出す（`TouchIndicator`）。シミュレータの録画には指が映らないため |
 | `-demoCamera <写真のパス>` | **デモカメラ**（`DemoCamera`）。カメラの映像の代わりに写真を手持ちのように揺らして映し、株が選ばれていれば1秒で見つけたことにする。**シミュレータでもカメラタブが動く。**吹き出し・シャッター・迎える・名前の入力は本物 |
 | `-demoPlantBox x,y,w,h` | デモカメラの写真の中の株の枠（写真に対する割合・左上が原点）。写真を替えたときに渡す |
-| `-demoWaterAfter <秒>` | デモカメラで、名前をつけてからその秒数後に水をあげたことにする（水やり直後の帯まで上げる） |
+| `-demoScript YES` | デモカメラで、名前をつけたあとのセリフを撮影用の台本の順にする（`DemoCamera.script`）。お水欲しいな → 水 → 気持ち良い！ありがとう → 日向ぼっこしたい → 日向 → あったかい、ありがとう。**セリフはセリフ集から取り出す。**台本のあいだは土を乾かさない |
+| `-demoSensor <画像のパス>` | デモカメラの台本の最後に、この画像のセンサーを鉢に刺す（D64）。刺さったところでガジェット（`gadget-001`）をいまの株に結び、センサーの取得を始める。**台本（`-demoScript`）のときは起動時にセンサーへ繋がない** |
+| `-sensorBaseURL <URL>` | センサーの中継サーバーのアドレス。シミュレータでは `http://localhost:8787` |
+| `-sensorHandleOffset 0` | センサーの枠のつまみを縦の真ん中から始める（前に動かした置き場所を持ち越さない） |
 | `-skipTitle YES` | タイトル画面を出さない |
+| `-openSensorDrawer YES` | カメラ画面の右端のセンサーの枠（D64）を開いて始める |
+| `-sensorBaseURL <URL>` | センサー中継サーバーのアドレス。シミュレータでは `http://localhost:8787` を渡すと、同じ Mac の `npm run sensor` と `npm run mock:gadget` で枠の中身まで確かめられる |
 
 ### 紹介動画の台本（UIテスト）
 
@@ -174,7 +179,7 @@ xcrun simctl launch <device> dev.plavo.PlavoApp -startTab 3 -openHousehold 1
 | テスト | 撮るもの |
 |---|---|
 | `testDemoTour` | マイプラント・日記・トーク・プロフィール |
-| `testCameraTour` | カメラ（デモカメラ）。迎える → 名前 → セリフ → 水 → 撮る |
+| `testCameraTour` | カメラ（デモカメラ）。迎える → 名前 → 台本のセリフ（水・日向）→ センサーを刺して枠を開く → 撮る |
 | `testFlipbookTour` | ひまりのパラパラ |
 
 ### 実機が必要な部分

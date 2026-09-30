@@ -190,30 +190,14 @@ struct PlantSelectorArc: View {
 
     // MARK: - 地の明暗（タブバーに合わせる）
 
-    /// 地を明るいほうにするか。
-    ///
-    /// **タブバーと同じで、白か黒のどちらか。**タブバーは周りの明るさで
-    /// 白い地と黒い地を切り替えるが、途中の灰色は作らない。
-    /// 弧だけが連続で変わると、同じ画面に並んだときに別の作りに見える。
+    /// 地を明るいほうにするか。白か黒の2状態で、境目はセンサーの枠と共有する（`EdgeChrome`）
     @State private var lightChrome = false
 
-    /// 切り替わる明るさ。**入る値と出る値をずらしてある。**
-    /// 1つの境目だと、境目付近で明るさが揺れるたびに白黒が往復する
-    private let toLightAt: Double = 0.58
-    private let toDarkAt: Double = 0.42
-
-    /// 全体枠（通常円・拡大円）の色。
-    ///
-    /// **ガラスに掛ける色として使う。**タブバーの地と同じ明暗を、
-    /// 実測した明るさから決める。濃さは 0.82 で固定
-    private var chromeTint: Color {
-        Color(white: lightChrome ? 0.92 : 0.06).opacity(0.82)
-    }
+    /// 全体枠（通常円・拡大円）の色。ガラスに掛ける
+    private var chromeTint: Color { EdgeChrome.tint(light: lightChrome) }
 
     /// 選ばれていない名前の色。地が白へ回れば、文字は黒へ回る
-    private var nameColor: Color {
-        lightChrome ? .black.opacity(0.66) : .white.opacity(0.72)
-    }
+    private var nameColor: Color { EdgeChrome.text(light: lightChrome) }
 
     /// 囲い枠の塗り。**塊はいつも地より明るい**（タブバーの選択中と同じ）。
     /// 暗い地には薄く白を重ね、明るい地では白で塗り切って持ち上げる
@@ -221,18 +205,8 @@ struct PlantSelectorArc: View {
         .white.opacity(lightChrome ? 0.92 : 0.20)
     }
 
-    /// ガラスの縁の光沢を、どれだけ削るか。
-    ///
-    /// **縁そのものは残す。**タブバーの全体枠にも縁の光沢はあり、
-    /// 消してしまうと材料が違って見える。ただし**弧は輪郭の片側しか
-    /// 見えないぶん、同じ光沢でも一本の線として強く出る。**
-    ///
-    /// 削り方は「この幅だけ大きく描いて、元の大きさで切る」（`arcVisual`）。
-    /// 0 なら手を加えない。増やすほど、いちばん明るいところから順に落ちる。
-    ///
-    /// **暗い地のほうを多く削る。**白い光沢は黒地でいちばん際立つ。
-    /// 明るい地では地に紛れるので、ほとんど削らなくていい。
-    private var glassRimTrim: CGFloat { lightChrome ? 0.5 : 1.5 }
+    /// ガラスの縁の光沢を削る幅（`EdgeChrome.rimTrim`）
+    private var glassRimTrim: CGFloat { EdgeChrome.rimTrim(light: lightChrome) }
 
     /// 弧のいちばん出っ張るところの横位置
     private var apexX: CGFloat { expandedRadius + expandedCenterX }
@@ -317,9 +291,9 @@ struct PlantSelectorArc: View {
         .allowsHitTesting(!receding)
         // 地の明暗はここで決める。**弧の中で連続値を色に変えない。**
         // 変えると白黒のあいだの灰色ができ、タブバーと作りが違ってしまう
-        .onAppear { lightChrome = ambientBrightness >= toLightAt }
+        .onAppear { lightChrome = ambientBrightness >= EdgeChrome.toLightAt }
         .onChange(of: ambientBrightness) { _, value in
-            let next = value >= (lightChrome ? toDarkAt : toLightAt)
+            let next = EdgeChrome.isLight(value, current: lightChrome)
             guard next != lightChrome else { return }
             // 切り替わりは目に付くので、色だけをゆっくり移す
             withAnimation(.easeInOut(duration: 0.28)) { lightChrome = next }

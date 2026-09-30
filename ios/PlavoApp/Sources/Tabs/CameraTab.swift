@@ -25,6 +25,8 @@ struct CameraTab: View {
     @State private var pendingCapture: CapturedPlant?
     /// 左下の1枚を開いているか。開いている写真の参照を持つ（D42）
     @State private var expandedPhoto: String?
+    /// 右端のセンサーの枠を開いているか（D64）。起動引数 `-openSensorDrawer YES` で開いて始まる
+    @State private var sensorDrawerOpen = UserDefaults.standard.bool(forKey: "openSensorDrawer")
     /// いま新しい株を迎えている最中か。
     /// 2株目以降は「まだ誰もいない」条件では拾えないため、これで見分ける
     @State private var addingPlant = false
@@ -61,6 +63,12 @@ struct CameraTab: View {
     /// このとき植物は**探してすらいない**（`SceneController.canDetectPlant`）。
     /// 見つからないのではなく、見ていない
     private var unassigned: Bool { model.store.selectedPlant == nil }
+
+    /// カメラが植物を捉えているか。センサーの枠の中身はこれとセンサーの受信がそろったときだけ出す
+    private var plantDetected: Bool {
+        if case .plant = scene.subject { return true }
+        return false
+    }
 
     var body: some View {
         ZStack {
@@ -122,6 +130,15 @@ struct CameraTab: View {
                 receding: shutterMode == .addPlant
             )
             .ignoresSafeArea(.keyboard)
+
+            // センサー付きの植物の値（D64）。弧の反対側、右端に付く。
+            // 名前を入れている間と、撮った1枚を確かめている間は退く
+            if pendingCapture == nil, !isNaming {
+                SensorDrawer(
+                    model: model, detected: plantDetected,
+                    ambientBrightness: scene.ambientBrightness, isOpen: $sensorDrawerOpen)
+                    .ignoresSafeArea(.keyboard)
+            }
 
             // 撮った1枚を止めて相手を確かめる（植物の追加）。
             // **弧より上に重ねる。**確認中は他に触れる先を作らない
@@ -206,7 +223,7 @@ struct CameraTab: View {
         }
     }
 
-    /// モックで水をあげる。説明員の隠し操作と、撮影用のデモカメラ（`-demoWaterAfter`）から呼ぶ
+    /// モックで水をあげる。説明員の隠し操作から呼ぶ
     private func waterMock() {
         // 水やりは数分で土に染みる。1ステップの跳ね上がりとして表現する
         model.updateMoisture(min(100, model.soilMoisture + Self.mockWateringJump))
@@ -299,6 +316,8 @@ struct CameraTab: View {
 
     private func dryIfMocked() {
         guard !model.usingRealSensor, case .plant = scene.subject else { return }
+        // 撮影用の台本のあいだは乾かさない。乾いて帯域が変わると、台本と別のセリフに差し替わる
+        guard !DemoCamera.isScripted else { return }
         model.updateMoisture(max(0, model.soilMoisture - dryingRate * Self.tickInterval))
         // **名前をつけている間はセリフを引き直さない。**
         // 引き直すと「はじめまして。名前をつけてくれる？」が
@@ -784,17 +803,55 @@ struct CameraTab: View {
         isNaming = false
         addingPlant = false
         nameFieldFocused = false
-        greetThenSettle()
-        // 撮影用のデモカメラ。のどが渇いた声を聞かせてから、水をあげたことにする
-        if let delay = DemoCamera.waterAfter {
-            Task {
-                try? await Task.sleep(for: .seconds(delay))
-                // たっぷりあげたことにする。モックの1回ぶん（+45）では、乾ききった土から
-                // 「ちょうどいい」までしか戻らず、水をもらった声（watered）にならない
-                model.updateMoisture(DemoCamera.wateredMoisture)
-                refreshLine(force: true)
+        // 撮影用の台本（DemoCamera.script）。普段どおりの流れの代わりに、決めた順で話す
+        if DemoCamera.isScripted {
+            playDemoScript()
+        } else {
+            greetThenSettle()
+        }
+    }
+
+    /// 撮影用の台本を流す。セリフは**セリフ集から**取り出す（無ければ落として気づかせる）
+    private func playDemoScript() {
+        Task {
+            var elapsed: TimeInterval = 0
+            for step in DemoCamera.script {
+                try? await Task.sleep(for: .seconds(step.at - elapsed))
+                elapsed = step.at
+                if let moisture = step.moisture { model.updateMoisture(moisture) }
+                if let light = step.light {
+                    withAnimation(.easeInOut(duration: 1.4)) { DemoStage.shared.light = light }
+                }
+                if step.insertSensor { insertDemoSensor() }
+                if let next = step.line, let text = scriptedLine(next) { line = text }
             }
         }
+    }
+
+    /// センサーを鉢に刺す（D64）。刺さったところで、いま見ている株にガジェットを結び、値を取り始める。
+    /// **起動したときには繋がない**（RootView）。先に繋ぐと、届いた水分で台本の値が上書きされる
+    private func insertDemoSensor() {
+        withAnimation(.easeIn(duration: DemoCamera.sensorDropDuration)) { DemoStage.shared.sensorDrop = 1 }
+        Task {
+            try? await Task.sleep(for: .seconds(DemoCamera.sensorDropDuration))
+            Haptics.snap()
+            if let plantId = model.store.selectedPlantId {
+                model.store.linkGadget(DemoCamera.gadgetId, to: plantId)
+            }
+            model.startSensor()
+        }
+    }
+
+    private func scriptedLine(_ line: DemoCamera.ScriptStep.Line) -> String? {
+        guard let bank = model.bank else { return nil }
+        let (pool, text): ([String], String) =
+            switch line {
+            case .greeting(let text): (bank.greetings, text)
+            case .moisture(let key, let text): (bank.moisture.first { $0.key == key }?.lines ?? [], text)
+            case .light(let key, let text): (bank.light.first { $0.key == key }?.lines ?? [], text)
+            }
+        assert(pool.contains(text), "セリフ集に無いセリフ: \(text)")
+        return pool.contains(text) ? text : nil
     }
 
     /// AR の診断表示。吹き出しが出ないときの切り分けに使う。
