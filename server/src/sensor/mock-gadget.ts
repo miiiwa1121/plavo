@@ -7,6 +7,10 @@
 //   引数: --url http://localhost:8787  送信先
 //         --id gadget-001              ガジェットID
 //         --interval 1000              送信間隔(ms)
+//         --percent 15                 土の湿りの始まり(%)。既定は水切れ（D25）
+//         --drying 0.6                 乾く速さ(%/秒)
+//         --lux 12400                  光量(lx)
+//         --jitter                     気温・湿度・光量を毎回少し揺らす（紹介動画で「届き続けている」を見せる）
 
 const args = process.argv.slice(2);
 function arg(name: string, fallback: string): string {
@@ -26,12 +30,31 @@ if (!Number.isFinite(interval) || interval < 100) {
 /** Enter 1回の水やりで上がる量（ポイント）。アプリのモック操作と同じ */
 const WATERING_JUMP = 45;
 
-// D25 のデモに合わせ、水切れの状態から始める
-let percent = 15;
-let raw = 380;
+/** 数の引数。数でなければ止める（下の --interval と同じ理由） */
+function numberArg(name: string, fallback: number): number {
+  const value = Number(arg(name, String(fallback)));
+  if (!Number.isFinite(value)) {
+    console.error(`--${name} は数で指定してください（受け取った値: ${arg(name, "")}）`);
+    process.exit(1);
+  }
+  return value;
+}
+
+// 既定は D25 のデモに合わせ、水切れの状態から始める
+let percent = numberArg("percent", 15);
+let raw = toRaw(percent);
 
 /** 乾く速さ（%/秒）。実際は数日かけて乾くが、検証では体感できる速さにする */
-const dryingRate = 0.6;
+const dryingRate = numberArg("drying", 0.6);
+const baseLux = numberArg("lux", 12_400);
+const jitter = args.includes("--jitter");
+/** 揺らす量。jitter のときだけ、中心の値のまわりで小さく動かす */
+const wobble = (center: number, amount: number, digits: number) => {
+  if (!jitter) return center;
+  const value = center + (Math.random() * 2 - 1) * amount;
+  const scale = 10 ** digits;
+  return Math.round(value * scale) / scale;
+};
 
 function toRaw(p: number): number {
   // 静電容量式センサーの生値を模す。乾いているほど値が大きい向き
@@ -43,9 +66,9 @@ async function send(): Promise<void> {
     gadgetId,
     measuredAt: new Date().toISOString(),
     soilMoisture: { raw, percent: Math.round(percent * 10) / 10 },
-    lightLux: 12_400,
-    temperature: 24.6,
-    humidity: 52.1,
+    lightLux: Math.round(wobble(baseLux, baseLux * 0.02, 0)),
+    temperature: wobble(24.6, 0.2, 1),
+    humidity: wobble(52.1, 0.6, 1),
     nutrientEc: 1.4,
     battery: 87,
   };
