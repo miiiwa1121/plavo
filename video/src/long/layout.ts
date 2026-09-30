@@ -34,8 +34,6 @@ export type Layout = {
       width: number;
       fontSize: number;
       align: "center" | "left" | "right";
-      /** 文字の後ろにうっすら影を敷く（端末に重なっても読めるように） */
-      shadow?: boolean;
     };
     presenter: { left: number; top: number; width: number };
     /** 吹き出し。top か bottom のどちらかで置く。しっぽは下（キャラクターが下）か左（キャラクターが左）に出す */
@@ -93,12 +91,12 @@ export const portrait: Layout = {
   },
   header: {
     steps: { kind: "line", left: 100, top: 100, width: 880, fontSize: 28 },
-    narration: { left: 60, top: 136, width: 960, fontSize: 48, align: "center" },
+    narration: { left: 60, top: 128, width: 960, fontSize: 56, align: "center" },
     presenter: { left: 110, top: 296, width: 118 },
     bubble: { left: 262, top: 306, maxWidth: 720, minWidth: 0, fontSize: 38, tail: "left", tailOffset: 34 },
   },
   note: { centerX: 540, bottom: 28 },
-  overview: { columns: 3, rows: 2, miniWidth: 300, bezel: 8, gap: 32, captionTop: 230, captionSize: 58, gridTop: 350 },
+  overview: { columns: 3, rows: 2, miniWidth: 300, bezel: 8, gap: 32, captionTop: 150, captionSize: 58, gridTop: 400 },
 };
 
 // MARK: - 横画面（1920×1080）
@@ -129,13 +127,13 @@ export const landscape: Layout = {
   header: {
     steps: { kind: "stepper", left: 110, top: 190, gap: 100, dot: 30, fontSize: 36 },
     // 語り手は右上に右詰めで置く。少しなら端末に重なってよい
-    narration: { left: 1000, top: 70, width: 860, fontSize: 44, align: "right", shadow: true },
+    narration: { left: 1000, top: 64, width: 860, fontSize: 52, align: "right" },
     // 案内役は右下に立たせ、吹き出しはその上から話す
     presenter: { left: 1500, top: 640, width: 300 },
     // 右端をそろえて置く。一言の長さが変わっても、しっぽはいつも案内役の頭を指す。
-    // 幅は13字まで1行に収まる（「今の気持ちがまるわかりだ！」）。途中で折り返すと「まる／わかり」と切れる
+    // 幅は13字まで1行に収まる（「今の状態が丸わかりだね！」は12字）。途中で折り返すと語の途中で切れる
     bubble: { right: 40, bottom: 1080 - 640 + 50, maxWidth: 660, minWidth: 0, fontSize: 40, tail: "bottom", tailOffset: 200 },
   },
   note: { centerX: L.centerX, bottom: 20 },
-  overview: { columns: 6, rows: 1, miniWidth: 244, bezel: 7, gap: 30, captionTop: 170, captionSize: 60, gridTop: 300 },
+  overview: { columns: 6, rows: 1, miniWidth: 244, bezel: 7, gap: 30, captionTop: 130, captionSize: 60, gridTop: 330 },
 };

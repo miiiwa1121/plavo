@@ -111,16 +111,16 @@ export const PresenterBubble: React.FC<{
         }}
       >
         {text}
-        {/* しっぽ。キャラクターへ向ける */}
+        {/* しっぽ。キャラクターへ向ける。
+            縁の内側（文字の側）から描き始め、svg の外は切り落とす。svg は縁の内側の線から外へだけ置くので、
+            しっぽの2辺は縁の線とつながり、縁より内側へは突き出さない。2辺のあいだの縁は白で塗りつぶす */}
         {tail === "bottom" ? (
-          <svg width={60} height={46} viewBox="0 0 60 46" style={{ position: "absolute", right: tailOffset, bottom: -40, overflow: "visible" }}>
-            <path d="M4 0 L 14 42 L 44 0 Z" fill="#FFFFFF" stroke={colors.accent} strokeWidth={4} strokeLinejoin="round" />
-            <rect x={0} y={-8} width={52} height={10} fill="#FFFFFF" />
+          <svg width={60} height={40} viewBox="0 0 60 40" style={{ position: "absolute", right: tailOffset, bottom: -40 }}>
+            <path d="M1.8 -8 L 14 36 L 50.7 -8" fill="#FFFFFF" stroke={colors.accent} strokeWidth={4} strokeLinejoin="round" />
           </svg>
         ) : (
-          <svg width={46} height={44} viewBox="0 0 46 44" style={{ position: "absolute", left: -40, top: tailOffset, overflow: "visible" }}>
-            <path d="M46 4 L 2 22 L 46 38 Z" fill="#FFFFFF" stroke={colors.accent} strokeWidth={4} strokeLinejoin="round" />
-            <rect x={44} y={0} width={10} height={44} fill="#FFFFFF" />
+          <svg width={40} height={44} viewBox="0 0 40 44" style={{ position: "absolute", left: -40, top: tailOffset }}>
+            <path d="M48 2.8 L 2 21 L 48 39.2" fill="#FFFFFF" stroke={colors.accent} strokeWidth={4} strokeLinejoin="round" />
           </svg>
         )}
       </div>

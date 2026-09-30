@@ -14,7 +14,7 @@ import {
 } from "remotion";
 import { createContext, useContext } from "react";
 import { colors, font } from "../theme";
-import { actNames, overview, overviewCaption, sources } from "./cuts";
+import { actNames, comments, overview, overviewCaption, sources } from "./cuts";
 import { landscape, portrait, type Layout } from "./layout";
 import { PresenterBubble, PresenterCharacter } from "./Presenter";
 import {
@@ -273,38 +273,69 @@ const WaterDrops: React.FC = () => {
 };
 
 /**
- * 日向の光の筋。右上から斜めに差し込み、ゆっくり揺れる。
- * 映像の明るさと暖かさはアプリの側（DemoStage）で変えてある。ここでは「日が差した」ことを見せる
+ * 日向の演出。右上から太陽が顔を出し、暖かい光がにじみ、光の筋が斜めに差し込む。
+ * 映像の明るさと暖かさはアプリの側（DemoStage）で変えてある。ここでは「日が差した」ことをはっきり見せる。
+ * 水やりのしずくと同じく、絵で分かるようにする（光の筋だけでは気づきにくかった）
  */
 const SunBeams: React.FC = () => {
   const frame = useCurrentFrame();
-  const appear = interpolate(frame, [0, 24], [0, 1], { ...clamp, easing: Easing.out(Easing.quad) });
+  const { fps } = useVideoConfig();
+  const { screenWidth } = useLayout();
+  const appear = interpolate(frame, [0, 20], [0, 1], { ...clamp, easing: Easing.out(Easing.quad) });
   const beams = [
-    { offset: 0.1, width: 0.16, strength: 0.55 },
-    { offset: 0.36, width: 0.1, strength: 0.4 },
-    { offset: 0.56, width: 0.2, strength: 0.3 },
+    { offset: 0.06, width: 0.2, strength: 0.85 },
+    { offset: 0.32, width: 0.12, strength: 0.65 },
+    { offset: 0.52, width: 0.24, strength: 0.5 },
   ];
+  // 太陽は右上の角から、少し弾んで顔を出す。光線はゆっくり回る
+  const rise = spring({ frame, fps, config: { damping: 12, mass: 0.7 } });
+  const sun = screenWidth * 0.46;
   return (
-    <AbsoluteFill style={{ pointerEvents: "none", overflow: "hidden", opacity: appear, mixBlendMode: "screen" }}>
-      {beams.map((beam, i) => {
-        const sway = Math.sin((frame + i * 20) / 38) * 0.02;
-        return (
-          <div
-            key={i}
-            style={{
-              position: "absolute",
-              top: "-30%",
-              left: `${(beam.offset + sway) * 100 + 40}%`,
-              width: `${beam.width * 100}%`,
-              height: "160%",
-              transform: "rotate(28deg)",
-              transformOrigin: "top center",
-              background: `linear-gradient(rgba(255, 226, 150, ${beam.strength}), rgba(255, 226, 150, 0) 75%)`,
-              filter: "blur(6px)",
-            }}
-          />
-        );
-      })}
+    <AbsoluteFill style={{ pointerEvents: "none", overflow: "hidden" }}>
+      <AbsoluteFill style={{ opacity: appear, mixBlendMode: "screen" }}>
+        {/* 右上からにじむ暖かい光 */}
+        <AbsoluteFill
+          style={{ background: "radial-gradient(circle at 92% 10%, rgba(255, 200, 90, 0.6) 0%, rgba(255, 200, 90, 0) 62%)" }}
+        />
+        {beams.map((beam, i) => {
+          const sway = Math.sin((frame + i * 20) / 38) * 0.02;
+          return (
+            <div
+              key={i}
+              style={{
+                position: "absolute",
+                top: "-30%",
+                left: `${(beam.offset + sway) * 100 + 40}%`,
+                width: `${beam.width * 100}%`,
+                height: "160%",
+                transform: "rotate(28deg)",
+                transformOrigin: "top center",
+                background: `linear-gradient(rgba(255, 222, 140, ${beam.strength}), rgba(255, 222, 140, 0) 75%)`,
+                filter: "blur(4px)",
+              }}
+            />
+          );
+        })}
+      </AbsoluteFill>
+      <svg
+        width={sun}
+        height={sun}
+        viewBox="-100 -100 200 200"
+        style={{
+          position: "absolute",
+          right: -sun * 0.3,
+          top: sun * 0.02,
+          opacity: appear,
+          transform: `translate(${(1 - rise) * sun * 0.5}px, ${(rise - 1) * sun * 0.5}px) scale(${0.6 + 0.4 * rise})`,
+        }}
+      >
+        <g transform={`rotate(${frame * 0.8})`}>
+          {Array.from({ length: 10 }, (_, i) => (
+            <rect key={i} x={-7} y={-94} width={14} height={30} rx={7} fill="#FFC93C" transform={`rotate(${i * 36})`} />
+          ))}
+        </g>
+        <circle r={52} fill="#FFD454" stroke="white" strokeWidth={6} />
+      </svg>
     </AbsoluteFill>
   );
 };
@@ -497,15 +528,18 @@ function runOf(frame: number, pick: (clip: PlacedClip) => string | undefined) {
   return { text, since };
 }
 
-/** 語り手の一言（使い方の説明）。縦画面は上の中央、横画面は左の列 */
+/**
+ * 語り手の一言（使い方の説明）。縦画面は上の中央、横画面は右上。
+ * 一言が変わるたびに、右から滑り込みながら出る。枠は付けず、文字の下に行ごとの長さで白いモヤを敷き、文字にうっすら影を付ける
+ * （端末に重なっても読めるように）。一言の中の改行（\n）はそのまま改行する
+ */
 const Narration: React.FC = () => {
   const { narration } = useLayout().header;
   const frame = useCurrentFrame();
   const { text, since } = runOf(frame, (clip) => clip.narration);
-  const shadowed = narration.shadow === true;
   const local = frame - since;
-  const opacity = interpolate(local, [0, 9], [0, 1], clamp);
-  const rise = interpolate(local, [0, 12], [18, 0], { ...clamp, easing: Easing.out(Easing.cubic) });
+  const opacity = interpolate(local, [0, 12], [0, 1], clamp);
+  const slide = interpolate(local, [0, 16], [80, 0], { ...clamp, easing: Easing.out(Easing.cubic) });
   return (
     <div
       lang="ja"
@@ -517,45 +551,45 @@ const Narration: React.FC = () => {
         textAlign: narration.align,
         // 文節で折り返す（「迎えまし／ょう。」のような途中の折り返しを避ける）
         wordBreak: "auto-phrase" as React.CSSProperties["wordBreak"],
+        whiteSpace: "pre-line",
         fontSize: narration.fontSize,
         lineHeight: 1.4,
         fontWeight: 700,
         letterSpacing: 2,
         color: colors.text,
+        textShadow: "0 3px 14px rgba(20, 40, 25, 0.25)",
         opacity,
-        transform: `translateY(${rise}px)`,
+        transform: `translateX(${slide}px)`,
       }}
     >
-      {shadowed ? (
-        // 端末に少し重なっても読めるよう、文字の後ろにうっすら影を敷く
-        <span
-          style={{
-            display: "inline-block",
-            padding: "10px 22px",
-            borderRadius: 18,
-            backgroundColor: "rgba(242, 245, 239, 0.72)",
-            boxShadow: "0 10px 30px rgba(20, 40, 25, 0.16)",
-            backdropFilter: "blur(6px)",
-          }}
-        >
-          {text}
-        </span>
-      ) : (
-        text
-      )}
+      {/* 白いモヤ。行ごとに、その行の文字の長さだけ敷く（折り返した行ごとに背景と影を付け直す）。
+          縁が見えないよう、同じ白の影でぼかして文字の外へにじませる */}
+      <span
+        style={{
+          backgroundColor: "rgba(255, 255, 255, 0.9)",
+          boxShadow: "0 0 18px 12px rgba(255, 255, 255, 0.9)",
+          borderRadius: 12,
+          boxDecorationBreak: "clone",
+          WebkitBoxDecorationBreak: "clone",
+        }}
+      >
+        {text}
+      </span>
     </div>
   );
 };
 
-/** 案内役。キャラクターの一言があるあいだだけ吹き出しで話し、無いときは黙って立っている */
+/** 案内役。キャラクターの一言（cuts.ts の comments・動画の秒）があるあいだだけ吹き出しで話し、無いときは黙って立っている */
 const Presenter: React.FC = () => {
   const { presenter, bubble } = useLayout().header;
   const frame = useCurrentFrame();
-  const { text, since } = runOf(frame, (clip) => clip.comment);
+  const current = comments.find((c) => frame >= Math.round(c.from * FPS) && frame < Math.round(c.to * FPS));
+  const text = current?.text;
+  const since = current ? Math.round(current.from * FPS) : -1000;
   return (
     <>
       <div style={{ position: "absolute", left: presenter.left, top: presenter.top }}>
-        <PresenterCharacter width={presenter.width} talkingSince={text ? since : -1000} />
+        <PresenterCharacter width={presenter.width} talkingSince={since} />
       </div>
       {text && (
         <div style={{ position: "absolute", left: bubble.left, right: bubble.right, top: bubble.top, bottom: bubble.bottom }}>
