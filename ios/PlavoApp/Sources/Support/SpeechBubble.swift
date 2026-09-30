@@ -45,7 +45,7 @@ struct SpeechBubble: View {
 
     // MARK: - 風船
 
-    /// 地・内側の照り・縁に沿う光・縁、の順に重ねる。
+    /// 地・内側の照り・縁、の順に重ねる。
     private var balloon: some View {
         let shape = BalloonShape(tail: tail)
         return shape
@@ -65,7 +65,6 @@ struct SpeechBubble: View {
                     .blur(radius: 6)
                     .clipShape(shape)
             }
-            .overlay { gloss.clipShape(shape) }
             .overlay {
                 // 縁の光。上ほど明るく、下は落とす
                 shape.stroke(
@@ -83,43 +82,6 @@ struct SpeechBubble: View {
             .compositingGroup()
             .shadow(color: .black.opacity(0.18), radius: 14, y: 6)
             .shadow(color: .black.opacity(0.10), radius: 3, y: 1)
-    }
-
-    /// 反射。
-    ///
-    /// **縁に沿って走らせる。**ぼかした塊を中ほどに置く描き方では、
-    /// 平らな板に汚れが乗ったようにしか見えなかった。丸い面に映り込む光は
-    /// 輪郭をなぞるので、角の丸みに沿わせると一目で風船に見える。
-    ///
-    /// 左上に長いのを1本と短いのを1本、右下に1本。**3本まで。**
-    /// 増やすほど写実に寄っていき、絵としての軽さが消える。
-    private var gloss: some View {
-        GeometryReader { geo in
-            let w = geo.size.width
-            let h = geo.size.height
-            ZStack {
-                ContourStreak(corner: .topLeading, inset: 5, lead: 38, run: w * 0.13)
-                    .stroke(
-                        .white.opacity(0.95),
-                        style: StrokeStyle(lineWidth: 5, lineCap: .round))
-                    .blur(radius: 1)
-
-                // 少し離して置く短い1本。**離すから光に見える。**
-                // 続けて引くと、ただの太い縁取りになる
-                Capsule()
-                    .fill(.white.opacity(0.85))
-                    .frame(width: w * 0.11, height: 4.5)
-                    .position(x: w * 0.42, y: h * 0.14)
-                    .blur(radius: 1)
-
-                ContourStreak(corner: .bottomTrailing, inset: 5, lead: 34, run: w * 0.15)
-                    .stroke(
-                        .white.opacity(0.85),
-                        style: StrokeStyle(lineWidth: 4.5, lineCap: .round))
-                    .blur(radius: 1)
-            }
-        }
-        .allowsHitTesting(false)
     }
 
     /// 地の濃さ。明るい部屋では濃く、暗い部屋では薄くする。
@@ -242,51 +204,6 @@ struct BalloonShape: Shape {
 private func + (a: CGPoint, b: CGPoint) -> CGPoint { CGPoint(x: a.x + b.x, y: a.y + b.y) }
 private func - (a: CGPoint, b: CGPoint) -> CGPoint { CGPoint(x: a.x - b.x, y: a.y - b.y) }
 private func * (p: CGPoint, k: CGFloat) -> CGPoint { CGPoint(x: p.x * k, y: p.y * k) }
-
-/// 輪郭をなぞる光の筋。角の丸みを回り、そのまま辺へ抜ける。
-private struct ContourStreak: Shape {
-    enum Corner {
-        case topLeading
-        case bottomTrailing
-    }
-
-    var corner: Corner
-    /// 縁からどれだけ内側を走るか
-    var inset: CGFloat
-    /// 角を回り始める位置（度）。大きいほど手前から始まる
-    var lead: CGFloat
-    /// 角を回りきったあと、辺に沿って伸ばす長さ
-    var run: CGFloat
-
-    func path(in rect: CGRect) -> Path {
-        let full = min(BubbleMetrics.cornerRadius, min(rect.width, rect.height) / 2)
-        let box = rect.insetBy(dx: inset, dy: inset)
-        guard box.width > 0, box.height > 0 else { return Path() }
-        let r = max(1, full - inset)
-
-        var path = Path()
-        switch corner {
-        case .topLeading:
-            // 180°＝左、270°＝上（y が下向きの座標系）。
-            // 左下から回り始め、上へ抜ける
-            let center = CGPoint(x: box.minX + r, y: box.minY + r)
-            path.addArc(
-                center: center, radius: r,
-                startAngle: .degrees(180 - lead), endAngle: .degrees(270),
-                clockwise: false)
-            path.addLine(to: CGPoint(x: min(center.x + run, box.maxX), y: box.minY))
-        case .bottomTrailing:
-            // 0°＝右、90°＝下。右上から回り始め、下へ抜ける
-            let center = CGPoint(x: box.maxX - r, y: box.maxY - r)
-            path.addArc(
-                center: center, radius: r,
-                startAngle: .degrees(-lead), endAngle: .degrees(90),
-                clockwise: false)
-            path.addLine(to: CGPoint(x: max(center.x - run, box.minX), y: box.maxY))
-        }
-        return path
-    }
-}
 
 // MARK: - 寸法
 
