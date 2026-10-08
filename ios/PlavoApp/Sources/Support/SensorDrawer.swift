@@ -1,18 +1,18 @@
 import PlavoCore
 import SwiftUI
 
-/// カメラ画面の右端に付く、センサーの枠（D64）。
+/// カメラ画面の右端に付く、センサーの枠（D64 / D64-a）。
 ///
 /// 閉じているあいだは右端に縦長のつまみだけを出す。押すか左へ引くと、
 /// **つまみそのものが大きくなって枠になる。**閉じるときは小さくなりながら元のつまみに戻る。
-/// **中身はセンサー付きの植物を捉えているときだけ。**それ以外は「検出できません。」と出す。
+/// **中身はセンサーの札を捉えているときだけ。**それ以外は「検出できません。」と出す。
 ///
-/// 捉えている、とみなすのは次の2つがそろったとき:
-///   - カメラが植物を見つけている（`detected`）
-///   - ガジェットから値が届き続けている（`SensorClient.isLive`）
+/// 捉えている、とみなすのは次の2つがそろったとき（`tagDetected`。決めるのはカメラ画面）:
+///   - カメラが植物を見つけている
+///   - 植物の近くに赤い札が、続けて1秒ほど見えている（`SceneController.sensorTagVisible`）
 ///
-/// 片方だけでは出さない。植物が映っていてもセンサーが無ければ、
-/// その植物の値ではない。センサーが動いていても植物を見ていなければ、何の値か分からない。
+/// **値はすべて仮のデータ**（`SensorReadings`）。サーバーは使わない。
+/// 見つけても枠は勝手に開かない。**閉じたつまみの色で知らせる。**
 ///
 /// **形はユーザーの指定（縦長のつまみ・左だけ角の丸い枠）、材料は左の植物の弧に揃える。**
 /// 同じガラスと白黒の地（`EdgeChrome`）。扱いも弧と同じく、閉じているあいだは上下に滑らせて置き場所を変えられる。
@@ -22,8 +22,8 @@ import SwiftUI
 /// 開き具合（0〜1）から大きさ・縦の位置・角の丸みを決め、指で引いている途中もこの値が動く
 struct SensorDrawer: View {
     let model: AppModel
-    /// カメラが植物を見つけているか
-    let detected: Bool
+    /// センサーの札を捉えているか（植物を見つけていて、札が見えている）
+    let tagDetected: Bool
     /// 周囲の明るさ 0〜1。地を白にするか黒にするかをこれで決める（弧と同じ実測値）
     var ambientBrightness: Double = 0.3
     @Binding var isOpen: Bool
@@ -67,9 +67,10 @@ struct SensorDrawer: View {
     private static let bottomInset: CGFloat = 28 + ShutterBar.bigSize + 24
     private static let cornerRadius: CGFloat = 28
 
-    private var sensor: SensorClient { model.sensor }
-    private var payload: SensorPayload? {
-        detected && sensor.isLive ? sensor.lastPayload : nil
+    /// 枠に出す値。**土壌水分は説明員用の隠し操作と同じ値**（植物を捉えているあいだ乾き、「水をあげる」で上がる）。
+    /// 吹き出しのセリフと枠の数字が食い違わない
+    private var readings: SensorReadings? {
+        tagDetected ? SensorReadings(soilMoisture: model.soilMoisture) : nil
     }
 
     private var tint: Color { EdgeChrome.tint(light: lightChrome) }
@@ -115,6 +116,12 @@ struct SensorDrawer: View {
 
                 chromeBackground(shape)
                     .frame(width: frame.width, height: frame.height)
+                    // **札を見つけたら、閉じたつまみの色で知らせる**（D64-a）。枠は勝手に開かない。
+                    // 広がるにつれて薄め、開き切ったら地の色に戻す
+                    .overlay {
+                        shape.fill(Color.accentColor.opacity(tagDetected ? 0.85 * Double(1 - p) : 0))
+                            .animation(.easeInOut(duration: 0.25), value: tagDetected)
+                    }
                     // **中身は開き切った大きさで組み、図形で切り抜く。**
                     // 広がる途中の大きさで組むと、行が折り返しながら伸び縮みする
                     .overlay(alignment: .topLeading) {
@@ -256,8 +263,8 @@ struct SensorDrawer: View {
     /// 開いた枠の中身。捉えていれば値を、そうでなければ「検出できません。」
     private var content: some View {
         Group {
-            if let payload {
-                readings(payload)
+            if let readings {
+                readingsView(readings)
             } else {
                 Text("検出できません。")
                     .font(.body.weight(.medium))
@@ -267,21 +274,21 @@ struct SensorDrawer: View {
         }
         .padding(.horizontal, 22)
         .padding(.vertical, 24)
-        // 植物が映った・センサーが途切れた、の切り替わりを滑らかに
-        .animation(.easeInOut(duration: 0.2), value: payload == nil)
+        // 札が見えた・見えなくなった、の切り替わりを滑らかに
+        .animation(.easeInOut(duration: 0.2), value: readings == nil)
     }
 
     /// 届いている値を並べる。**土壌水分を先頭に大きく出す。**展示の筋書き（水切れ→水やり→回復）の主役
-    private func readings(_ payload: SensorPayload) -> some View {
+    private func readingsView(_ readings: SensorReadings) -> some View {
         VStack(alignment: .leading, spacing: 18) {
-            header(payload)
+            header
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(label(.soilMoisture))
                     .font(.subheadline)
                     .foregroundStyle(textColor)
                 HStack(alignment: .firstTextBaseline, spacing: 4) {
-                    Text(format(payload.soilMoisture.percent, .soilMoisture))
+                    Text(format(readings.soilMoisture, .soilMoisture))
                         .font(.system(size: 44, weight: .semibold, design: .rounded))
                         .foregroundStyle(strongColor)
                         .contentTransition(.numericText())
@@ -289,7 +296,7 @@ struct SensorDrawer: View {
                         .font(.title3.weight(.medium))
                         .foregroundStyle(textColor)
                 }
-                .animation(.default, value: payload.soilMoisture.percent)
+                .animation(.default, value: readings.soilMoisture)
             }
 
             Rectangle()
@@ -297,46 +304,43 @@ struct SensorDrawer: View {
                 .frame(height: 0.5)
 
             VStack(spacing: 12) {
-                row(.lightLux, payload.lightLux)
-                row(.temperature, payload.temperature)
-                row(.humidity, payload.humidity)
-                row(.nutrientEc, payload.nutrientEc)
-                if let battery = payload.battery {
-                    readingRow("電池", battery.formatted(.number.precision(.fractionLength(0))), "%")
-                }
+                row(.lightLux, readings.lightLux)
+                row(.temperature, readings.temperature)
+                row(.humidity, readings.humidity)
+                row(.nutrientEc, readings.nutrientEc)
+                readingRow("電池", readings.battery.formatted(.number.precision(.fractionLength(0))), "%")
             }
 
             Spacer(minLength: 0)
 
-            Text("計測 \(measuredTime(payload.measuredAt))")
-                .font(.caption.monospacedDigit())
-                .foregroundStyle(textColor)
+            // 仮のデータなので、いまの時刻を出す。土壌水分が止まっていても時刻は進める
+            TimelineView(.periodic(from: .now, by: 1)) { context in
+                Text("計測 \(context.date.formatted(date: .omitted, time: .standard))")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(textColor)
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
-    /// どの株の、どのガジェットの値か。**受信中の点**で、いま届いていることを示す
-    private func header(_ payload: SensorPayload) -> some View {
+    /// どの株の、どの札の値か。**点**で、いま捉えていることを示す
+    private var header: some View {
         HStack(spacing: 8) {
             Circle()
                 .fill(Color.accentColor)
                 .frame(width: 8, height: 8)
-            Text(model.store.plant(forGadget: payload.gadgetId)?.name ?? "センサー")
+            Text(model.store.selectedPlant?.name ?? "センサー")
                 .font(.headline)
                 .foregroundStyle(strongColor)
             Spacer()
-            Text(payload.gadgetId)
-                .font(.caption.monospaced())
+            Text("センサー（\(SensorTagColor.red.name)）")
+                .font(.caption)
                 .foregroundStyle(textColor)
         }
     }
 
-    /// 任意の項目。**届いていないものは出さない**（ガジェットによって載せているものが違う）
-    @ViewBuilder
-    private func row(_ id: MetricID, _ value: Double?) -> some View {
-        if let value {
-            readingRow(label(id), format(value, id), unit(id))
-        }
+    private func row(_ id: MetricID, _ value: Double) -> some View {
+        readingRow(label(id), format(value, id), unit(id))
     }
 
     private func readingRow(_ label: String, _ value: String, _ unit: String) -> some View {
@@ -363,11 +367,17 @@ struct SensorDrawer: View {
     private func format(_ value: Double, _ id: MetricID) -> String {
         value.formatted(.number.precision(.fractionLength(MetricCatalog.definition(id)?.fractionDigits ?? 0)))
     }
+}
 
-    private func measuredTime(_ iso: String) -> String {
-        let parser = ISO8601DateFormatter()
-        parser.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        let date = parser.date(from: iso) ?? ISO8601DateFormatter().date(from: iso)
-        return date?.formatted(date: .omitted, time: .standard) ?? iso
-    }
+/// 枠に出す値（D64-a）。**すべて仮のデータで、サーバーは使わない。**
+///
+/// 土壌水分だけは動く（説明員用の隠し操作の値）。ほかは固定で、
+/// 以前のモックのガジェット（server/src/sensor/mock-gadget.ts）と同じ値
+struct SensorReadings: Equatable {
+    var soilMoisture: Double
+    var lightLux: Double = 12_400
+    var temperature: Double = 24.6
+    var humidity: Double = 52.1
+    var nutrientEc: Double = 1.4
+    var battery: Double = 87
 }

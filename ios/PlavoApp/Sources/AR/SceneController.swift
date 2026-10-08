@@ -263,7 +263,7 @@ final class SceneController: NSObject {
     ///
     /// **実機で合わせ直す前提。**見本で測ったのは葉のかたまりだが、検出が返す枠は
     /// 前景マスクなので鉢まで含む可能性が高く、そのぶん枠が縦に伸びる
-    var plantSizeRatio: CGFloat = 0.25
+    var plantSizeRatio: CGFloat = 0.17
     /// 遠いほうの下限。これ以下は点にしか見えない
     private let minBubbleScale: CGFloat = 0.3
     /// 近いほうは、本体の幅が画面のこの割合になったら止める
@@ -298,6 +298,22 @@ final class SceneController: NSObject {
     private var model: AppModel?
     /// デモカメラ（DemoCamera）の刻み。ARView の毎フレームの代わり
     private var demoTimer: Timer?
+
+    // MARK: - センサーの札（D64-a）
+
+    /// センサーの札が見えているか。**出し入れの間（続けて1秒で出す・2秒見失って消す）を通したあとの値**
+    private(set) var sensorTagVisible = false
+    private var sensorTagTracker = SensorTagTracker()
+    private let sensorTagDetector = SensorTagDetector()
+    /// 札を探す間隔。**植物の検出（相手が決まったあとは1.2秒おき）とは別に回す。**
+    /// 植物の間隔のままだと、1回の取りこぼしで2秒が過ぎて消えてしまう。
+    /// 色を数えるだけなので軽い
+    private let sensorTagInterval: TimeInterval = 0.3
+    private var lastSensorTagScanAt: TimeInterval = 0
+    private var isScanningSensorTag = false
+    /// 最後に植物と認めた枠（割合）。**札は植物の近くの赤だけを数える**（`SensorTagDetector`）。
+    /// 毎回の前景マスクの枠をそのまま使うと、腕や靴を拾った小さな枠と比べることになる
+    private var lastPlantBox: CGRect?
     /// デモカメラで撮った1枚と、その中の株の枠。「迎える」の確認に渡す
     private(set) var demoCapturedBox: CGRect?
     /// 葉の塊の中ほど。しっぽが指す先
@@ -554,7 +570,9 @@ final class SceneController: NSObject {
             subject = .plant
             return
         }
-        placeAnchor(forNormalizedBox: box ?? CGRect(x: 0.3, y: 0.25, width: 0.4, height: 0.5))
+        let adopted = box ?? CGRect(x: 0.3, y: 0.25, width: 0.4, height: 0.5)
+        placeAnchor(forNormalizedBox: adopted)
+        lastPlantBox = adopted
         subject = .plant
     }
 
@@ -569,6 +587,8 @@ final class SceneController: NSObject {
         lastDetectionAt = 0
         detectionAttempts = 0
         detectionHits = 0
+        lastPlantBox = nil
+        clearSensorTag()
     }
 
     // MARK: - パネル
@@ -676,6 +696,7 @@ final class SceneController: NSObject {
                     return
                 }
                 self.missStreak = 0
+                self.lastPlantBox = box
 
                 switch self.subject {
                 case .none:
@@ -1170,6 +1191,7 @@ extension SceneController: ARSessionDelegate {
         Task { @MainActor in
             self.updateDiagnostics(frame)
             self.project(frame)
+            self.scanSensorTag(in: frame)
             guard !self.isDetectionSuspended, self.canDetectPlant else { return }
             // トラッキングが安定するまで検出しない。
             // 初期化中に打ったアンカーは位置が信用できず、吹き出しが飛ぶ原因になる。
@@ -1381,6 +1403,125 @@ extension simd_float4x4 {
     }
 }
 
+// MARK: - センサーの札（D64-a）
+
+extension SceneController {
+    /// 映像の1コマから札を探す。**植物を捉えているあいだだけ。**
+    ///
+    /// 見つけた・見つけなかったを `SensorTagTracker` に入れ、出し入れの間を通して
+    /// `sensorTagVisible` を決める。重い処理（縮小と色の走査）は画面の仕事の外で回す
+    fileprivate func scanSensorTag(in frame: ARFrame) {
+        guard subject == .plant, !isDetectionSuspended, let plantBox = lastPlantBox else {
+            if sensorTagVisible { clearSensorTag() }
+            return
+        }
+        let now = frame.timestamp
+        guard !isScanningSensorTag, now - lastSensorTagScanAt >= sensorTagInterval else { return }
+        lastSensorTagScanAt = now
+        isScanningSensorTag = true
+
+        guard let viewSize = arView?.bounds.size, viewSize.width > 0, viewSize.height > 0 else {
+            isScanningSensorTag = false
+            return
+        }
+        let pixelBuffer = frame.capturedImage
+        let orientation = Self.imageOrientation(for: arView?.window?.windowScene)
+        let detector = sensorTagDetector
+
+        Task.detached(priority: .utility) { [weak self] in
+            let found = Self.findSensorTag(
+                in: pixelBuffer, orientation: orientation, viewSize: viewSize, near: plantBox,
+                detector: detector)
+            await MainActor.run {
+                guard let self else { return }
+                self.isScanningSensorTag = false
+                // 探しているあいだに相手を見失っていたら、結果は捨てる
+                guard self.subject == .plant else { return }
+                self.sensorTagVisible = self.sensorTagTracker.update(seen: found, at: now)
+            }
+        }
+    }
+
+    /// 札のことを忘れる。相手を見失ったときと、検出し直すとき
+    fileprivate func clearSensorTag() {
+        sensorTagTracker.reset()
+        sensorTagVisible = false
+    }
+
+    /// 縮小に使う。**使い回す**（作るたびに Metal の準備が走る）。スレッドをまたいで使ってよい
+    nonisolated private static let sensorTagContext = CIContext()
+    /// 札を探す画像の幅（画面に映っている範囲を、この幅に縮める）。
+    /// 札ありの動画では、この幅でいちばん遠い札も 0.0015（約120画素）あった
+    nonisolated private static let sensorTagScanWidth = 192
+
+    /// 映像の1コマから、**画面に映っている範囲だけ**を切り出し、縮めてから札を探す。
+    ///
+    /// **カメラの映像は 4:3 で、画面いっぱいに拡大して左右を切り落として映している。**
+    /// 切り落とす前の全体で探すと、画面の外（縦持ちで左右あわせて約4割）の赤まで拾う。
+    /// 実機では、画面の端に赤い物が少し映るだけで検出していた（その物の大部分は画面の外にあった）。
+    ///
+    /// **向きは植物の検出と同じものを使う。**植物の枠（前景マスク）は向きを合わせた画像全体の
+    /// 左上を原点にした割合なので、切り出した範囲の割合に直してから比べる
+    nonisolated private static func findSensorTag(
+        in pixelBuffer: CVPixelBuffer, orientation: CGImagePropertyOrientation, viewSize: CGSize,
+        near plantBox: CGRect, detector: SensorTagDetector
+    ) -> Bool {
+        let image = CIImage(cvPixelBuffer: pixelBuffer).oriented(orientation)
+        let extent = image.extent
+        guard extent.width > 0, extent.height > 0 else { return false }
+
+        // 画面に映っている範囲（画像全体に対する割合）。拡大して中央で切り取るのと同じ計算
+        let scale = max(viewSize.width / extent.width, viewSize.height / extent.height)
+        let visibleSize = CGSize(width: viewSize.width / scale, height: viewSize.height / scale)
+        let visible = CGRect(
+            x: (extent.width - visibleSize.width) / 2 / extent.width,
+            y: (extent.height - visibleSize.height) / 2 / extent.height,
+            width: visibleSize.width / extent.width, height: visibleSize.height / extent.height)
+
+        // Core Image は左下が原点。中央で切るので上下は対称
+        let crop = CGRect(
+            x: extent.minX + visible.minX * extent.width,
+            y: extent.minY + (1 - visible.maxY) * extent.height,
+            width: visibleSize.width, height: visibleSize.height)
+        let width = sensorTagScanWidth
+        let height = max(1, Int((crop.height / crop.width * CGFloat(width)).rounded()))
+        let scaled = image.cropped(to: crop)
+            .transformed(by: CGAffineTransform(translationX: -crop.minX, y: -crop.minY))
+            .transformed(by: CGAffineTransform(
+                scaleX: CGFloat(width) / crop.width, y: CGFloat(height) / crop.height))
+
+        // 書き出しは画像の上の行から（向きを合わせたあとの左上が原点）
+        var pixels = [UInt8](repeating: 0, count: width * height * 4)
+        sensorTagContext.render(
+            scaled, toBitmap: &pixels, rowBytes: width * 4,
+            bounds: CGRect(x: 0, y: 0, width: width, height: height),
+            format: .RGBA8, colorSpace: CGColorSpace(name: CGColorSpace.sRGB))
+
+        // 植物の枠を、切り出した範囲の割合に直す
+        let plantInView = CGRect(
+            x: (plantBox.minX - visible.minX) / visible.width,
+            y: (plantBox.minY - visible.minY) / visible.height,
+            width: plantBox.width / visible.width, height: plantBox.height / visible.height)
+
+        return pixels.withUnsafeBytes {
+            detector.detect(rgba: $0, width: width, height: height, bytesPerRow: width * 4, near: plantInView)
+        } != nil
+    }
+
+    /// デモカメラで札を見つけたことにする（`-demoSensorTag YES`）。
+    ///
+    /// 出し入れの間は実機と同じ `SensorTagTracker` を通す
+    fileprivate func updateDemoSensorTag(now: TimeInterval) {
+        guard DemoCamera.showsSensorTag, subject == .plant else {
+            if sensorTagVisible { clearSensorTag() }
+            return
+        }
+        guard now - lastSensorTagScanAt >= sensorTagInterval else { return }
+        lastSensorTagScanAt = now
+        sensorTagVisible = sensorTagTracker.update(seen: true, at: now)
+    }
+}
+
 // MARK: - デモカメラ（紹介動画の撮影用・DemoCamera）
 
 extension SceneController {
@@ -1420,6 +1561,7 @@ extension SceneController {
                 return
             }
         }
+        updateDemoSensorTag(now: now)
         guard subject == .plant else { return }
 
         // 株の枠を、揺れと同じ式で画面に移す。吹き出しはそこから斜めに置く（D50）

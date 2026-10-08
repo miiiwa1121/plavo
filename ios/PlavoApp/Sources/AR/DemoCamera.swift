@@ -33,6 +33,9 @@ enum DemoCamera {
         return CGRect(x: 0.18, y: 0.43, width: 0.68, height: 0.30)
     }()
 
+    /// センサーの札を見つけたことにする。`-demoSensorTag YES` のときだけ（D64-a）
+    static var showsSensorTag: Bool { isEnabled && UserDefaults.standard.bool(forKey: "demoSensorTag") }
+
     /// 名前をつけたあとの流れを台本どおりにする。`-demoScript YES` のときだけ（`script`）
     static var isScripted: Bool { isEnabled && UserDefaults.standard.bool(forKey: "demoScript") }
 

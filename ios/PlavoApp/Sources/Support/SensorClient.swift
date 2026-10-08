@@ -32,19 +32,6 @@ final class SensorClient {
     private(set) var lastPayload: SensorPayload?
     private(set) var receivedCount = 0
 
-    /// いまガジェットから値が届き続けているか。カメラ画面のセンサーの枠はこれで出し分ける。
-    ///
-    /// **中継サーバーに繋がっているだけでは足りない。**サーバーは最後に受けた1点を
-    /// 返し続けるので、ガジェットが止まっても 200 で同じ値が返ってくる。
-    /// 計測時刻が進んでいるあいだだけ「届いている」とみなす
-    private(set) var isLive = false
-    /// 計測時刻が最後に進んだのを見た時刻（こちらの時計）。
-    /// PC とスマホの時計はずれうるので、計測時刻そのものとは比べない
-    private var lastFreshAt: Date?
-    /// 計測時刻が進まなくなってから、途切れたとみなすまでの時間。
-    /// ガジェットは1秒に1回送るので、数回の取りこぼしは許す
-    private let staleAfter: TimeInterval = 5
-
     /// 中継サーバーのアドレス。展示ではPCのローカルIPを入れる
     var baseURL: String {
         didSet { UserDefaults.standard.set(baseURL, forKey: Self.baseURLKey) }
@@ -98,8 +85,6 @@ final class SensorClient {
         task?.cancel()
         task = nil
         state = .idle
-        isLive = false
-        lastFreshAt = nil
     }
 
     /// 最新の1点を取りにいく先。**http / https でホストがあるときだけ。**
@@ -115,10 +100,6 @@ final class SensorClient {
     }
 
     private func poll(onReading: (SensorPayload) -> Void) async {
-        // 取れても取れなくても、周期ごとに見直す。失敗が続くと間が空くが、
-        // そのころには途切れてから十分に時間が経っている
-        defer { isLive = state == .connected && lastFreshAt.map { Date().timeIntervalSince($0) < staleAfter } == true }
-
         guard let url = latestURL else {
             state = .failed("アドレスが不正")
             return
@@ -143,7 +124,6 @@ final class SensorClient {
             }
 
             let payload = try Self.decoder.decode(SensorPayload.self, from: data)
-            if payload.measuredAt != lastPayload?.measuredAt { lastFreshAt = Date() }
             lastPayload = payload
             receivedCount += 1
             consecutiveFailures = 0

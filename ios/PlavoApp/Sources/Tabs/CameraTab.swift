@@ -135,7 +135,7 @@ struct CameraTab: View {
             // 名前を入れている間と、撮った1枚を確かめている間と、説明員用のパネルを開いている間は退く
             if pendingCapture == nil, !isNaming, !showMockControls {
                 SensorDrawer(
-                    model: model, detected: plantDetected,
+                    model: model, tagDetected: plantDetected && scene.sensorTagVisible,
                     ambientBrightness: scene.ambientBrightness, isOpen: $sensorDrawerOpen)
                     .ignoresSafeArea(.keyboard)
             }
