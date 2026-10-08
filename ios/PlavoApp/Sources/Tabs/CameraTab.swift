@@ -132,8 +132,8 @@ struct CameraTab: View {
             .ignoresSafeArea(.keyboard)
 
             // センサー付きの植物の値（D64）。弧の反対側、右端に付く。
-            // 名前を入れている間と、撮った1枚を確かめている間は退く
-            if pendingCapture == nil, !isNaming {
+            // 名前を入れている間と、撮った1枚を確かめている間と、説明員用のパネルを開いている間は退く
+            if pendingCapture == nil, !isNaming, !showMockControls {
                 SensorDrawer(
                     model: model, detected: plantDetected,
                     ambientBrightness: scene.ambientBrightness, isOpen: $sensorDrawerOpen)
@@ -662,15 +662,25 @@ struct CameraTab: View {
         }
         // シャッターに重ならないよう、少し上に置く
         .padding(.bottom, 116)
+        // **長押しを受ける範囲を画面の幅いっぱいにする。**
+        // 縦に並べた中身の幅で決まるので、上の株のアイコンの幅（約60pt）しか無く、
+        // 長押しが効くのは画面の真ん中の細い帯だけだった。株が未設定のときは
+        // アイコンが無く幅が0になり、どこを押しても開かなかった
+        .frame(maxWidth: .infinity)
         .contentShape(Rectangle())
         // 長押しの成立を返す。来場者には関係しない操作だが、
         // 1.5秒押して何も起きないと、押せているのかが分からない
         .onLongPressGesture(minimumDuration: 1.5) {
-            showMockControls.toggle()
-            // 開いている間だけ、毎フレームの特徴点を数える
-            scene.wantsDiagnostics = showMockControls
+            setMockControls(!showMockControls)
             Haptics.tap()
         }
+    }
+
+    /// 説明員用のパネルを開け閉めする
+    private func setMockControls(_ shown: Bool) {
+        showMockControls = shown
+        // 開いている間だけ、毎フレームの特徴点を数える
+        scene.wantsDiagnostics = shown
     }
 
     /// いまどの株を見ているか（D41）。
@@ -719,9 +729,23 @@ struct CameraTab: View {
     /// 診断は、吹き出しが出ないときにどこで失敗したのかを切り分けるために出す。
     private var mockPanel: some View {
         VStack(spacing: 10) {
-            Text(model.usingRealSensor ? "実センサー接続中" : "モック操作（説明員用）")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
+            HStack {
+                Text(model.usingRealSensor ? "実センサー接続中" : "モック操作（説明員用）")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                // **閉じる手段を見える形で置く。**もう一度長押しでも閉じるが、
+                // 開く操作が隠してあるぶん、閉じ方も知っている人にしか分からなかった
+                Button {
+                    setMockControls(false)
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.title3)
+                        .symbolRenderingMode(.hierarchical)
+                        .foregroundStyle(.secondary)
+                }
+                .accessibilityLabel("モック操作を閉じる")
+            }
 
             diagnostics
 
