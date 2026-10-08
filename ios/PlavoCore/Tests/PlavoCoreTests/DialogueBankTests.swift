@@ -40,7 +40,7 @@ final class DialogueBankTests: XCTestCase {
         // server の npm run check:dialogues が数える本数と一致すること。
         // 片方だけ更新されたら気づけるようにしておく。
         let bank = try loadBank()
-        XCTAssertEqual(bank.totalLineCount, 117)
+        XCTAssertEqual(bank.totalLineCount, 123)
     }
 
     func testNoEmptyLines() throws {
