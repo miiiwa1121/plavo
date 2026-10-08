@@ -37,6 +37,21 @@ enum EdgeChrome {
         light ? .black : .white
     }
 
+    /// 「ちょうど良い」の色。**地の明暗で濃さを変える。**白い地にシステムの緑のままだと文字が読みにくい
+    static func ok(light: Bool) -> Color {
+        light ? Color(red: 0.14, green: 0.54, blue: 0.24) : Color(red: 0.19, green: 0.82, blue: 0.35)
+    }
+
+    /// 「範囲から外れている」の色。緑と明るさも違う橙にして、色だけに頼らず見分けられるようにする
+    static func warn(light: Bool) -> Color {
+        light ? Color(red: 0.70, green: 0.28, blue: 0.0) : Color(red: 1.0, green: 0.62, blue: 0.04)
+    }
+
+    /// 図の下地（メーターや帯の、何も入っていない部分）
+    static func track(light: Bool) -> Color {
+        light ? .black.opacity(0.10) : .white.opacity(0.14)
+    }
+
     /// ガラスの縁の光沢を、どれだけ削るか。
     ///
     /// **縁そのものは残す。**タブバーの全体枠にも縁の光沢はあり、

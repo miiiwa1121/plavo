@@ -13,6 +13,8 @@ struct CameraTab: View {
     @State private var line = ""
     @State private var lastBandKey: String?
     @State private var showMockControls = false
+    /// 説明員用のパネルで開いているタブ
+    @State private var mockTab: MockTab = .values
 
     /// 撮影の結果を短く知らせる
     @State private var captureNotice: String?
@@ -38,12 +40,8 @@ struct CameraTab: View {
     @State private var nameDraft = ""
     @FocusState private var nameFieldFocused: Bool
 
-    /// モックで乾いていく速さ（%/秒）。実センサーが繋がれば使わない。
-    ///
-    /// 実際の植物は数日かけて乾くが、来場者が数分で変化を体感できる必要がある。
-    /// ただし速すぎると説明を聞いている間に危険域まで落ちる。
-    /// 水やり後（約60%）から適正の下限（25%）まで、およそ60秒かかる速さ。
-    private let dryingRate: Double = 0.6
+    /// モックで乾いていく速さ（%/秒）。決めているのは AppModel（センサーの枠の見積もりにも使う）
+    private let dryingRate = AppModel.mockDryingRate
     /// モックで土を乾かす刻み（秒）
     private static let tickInterval: TimeInterval = 0.5
     private let tick = Timer.publish(every: tickInterval, on: .main, in: .common).autoconnect()
@@ -130,6 +128,10 @@ struct CameraTab: View {
                 receding: shutterMode == .addPlant
             )
             .ignoresSafeArea(.keyboard)
+            // 説明員用のパネルを開いているあいだは隠す。パネルの左端に重なって文字が読めない
+            .opacity(showMockControls ? 0 : 1)
+            .allowsHitTesting(!showMockControls)
+            .animation(.easeInOut(duration: 0.2), value: showMockControls)
 
             // センサー付きの植物の値（D64）。弧の反対側、右端に付く。
             // 名前を入れている間と、撮った1枚を確かめている間と、説明員用のパネルを開いている間は退く
@@ -211,6 +213,12 @@ struct CameraTab: View {
             line = ""
         }
         .onReceive(tick) { _ in dryIfMocked() }
+        // 説明員が気温・湿度・光量などを動かしたら、話す内容も変わる（D64-b）。
+        // 帯域が変わったときだけ引き直すので、スライダーを動かしている最中にちらつかない
+        .onChange(of: model.environment) { _, _ in
+            guard !isNaming, !DemoCamera.isScripted else { return }
+            refreshLine(force: false, silent: true)
+        }
     }
 
     /// カメラの映像。撮影用のデモカメラでは、写真を手持ちのように揺らして映す
@@ -280,18 +288,24 @@ struct CameraTab: View {
     /// 帯域が変わったときだけセリフを引き直す。
     /// 毎秒引き直すと文字が落ち着かず、読めなくなる。
     ///
-    /// - Parameter silent: 触覚を返さない。説明員が水分を直接いじる場面で使う
+    /// **話す帯域は、土壌水分 → 光 → 気温 → 湿度の順に決まる**（D64-b・`AppModel.currentCondition`）。
+    /// 帯域の鍵は話題ごとに分けてあるので、水分の「快適」から環境の「快適」へ移っても気づける
+    ///
+    /// - Parameter silent: 触覚を返さない。説明員が値を直接いじる場面で使う
     private func refreshLine(force: Bool, silent: Bool = false) {
-        guard case .plant = scene.subject, let band = model.currentBand() else { return }
-        let changed = band.key != lastBandKey
+        guard case .plant = scene.subject, let condition = model.currentCondition() else { return }
+        let changed = condition.key != lastBandKey
         if force || changed {
-            lastBandKey = band.key
-            if let picked = model.picker.pick(from: band) {
+            lastBandKey = condition.key
+            if let picked = model.picker.pick(from: condition.band) {
                 line = picked
                 recordObservation(dialogue: picked)
                 // **帯域が変わったときだけ返す**（H-1）。
-                // セリフの伴奏なので、セリフが差し替わったここで鳴らす
-                if changed, !silent, let note = Haptics.Note(moistureBand: band.key) {
+                // セリフの伴奏なので、セリフが差し替わったここで鳴らす。
+                // 触覚は土壌水分の帯域に結びついているので、ほかの話題では鳴らさない
+                if changed, !silent, condition.topic == .moisture,
+                    let note = Haptics.Note(moistureBand: condition.band.key)
+                {
                     Haptics.plant(note)
                 }
             }
@@ -723,9 +737,11 @@ struct CameraTab: View {
         }
     }
 
-    /// 実センサーが繋がるまでの代替操作と、ARの診断表示。
+    /// 説明員用のパネル。仮のセンサーの値の操作と、ARの診断表示（D64-b）。
     ///
     /// 原則2により来場者には数値を見せないため、長押しで開く。
+    /// **タブで「センサーの値」と「AR の診断」を分ける。**診断は開発用で、
+    /// 説明員が値を操作するときには要らない（一緒に並べると、値の操作が画面の下に押しやられていた）。
     /// 診断は、吹き出しが出ないときにどこで失敗したのかを切り分けるために出す。
     private var mockPanel: some View {
         VStack(spacing: 10) {
@@ -747,31 +763,28 @@ struct CameraTab: View {
                 .accessibilityLabel("モック操作を閉じる")
             }
 
-            diagnostics
-
-            Button {
-                waterMock()
-            } label: {
-                Label("水をあげる", systemImage: "drop.fill")
+            Picker("表示", selection: $mockTab) {
+                Text("センサーの値").tag(MockTab.values)
+                Text("AR の診断").tag(MockTab.diagnostics)
             }
-            .buttonStyle(.borderedProminent)
+            .pickerStyle(.segmented)
 
-            HStack {
-                Slider(
-                    value: Binding(
-                        get: { model.soilMoisture },
-                        set: {
-                            model.updateMoisture($0)
-                            // **鳴らさない。**動かすたびに帯域をまたぐので、
-                            // 渇きと水を得た手応えが交互に鳴る
-                            refreshLine(force: true, silent: true)
-                        }), in: 0...100)
-                Text("\(Int(model.soilMoisture))%")
-                    .monospacedDigit().frame(width: 44, alignment: .trailing)
+            ScrollView {
+                switch mockTab {
+                case .values: mockValues
+                case .diagnostics: diagnostics
+                }
             }
-            .font(.caption)
+            // 値のスライダーは下に続く（光量・EC・pH）。開いたときに一度スクロールの印を見せて、続きがあると知らせる
+            .scrollIndicatorsFlash(onAppear: true)
+            .frame(maxHeight: 440)
 
-            HStack(spacing: 12) {
+            HStack(spacing: 16) {
+                Button("値を初めに戻す") {
+                    model.updateMoisture(AppModel.initialSoilMoisture)
+                    model.environment = .initial
+                    refreshLine(force: true, silent: true)
+                }
                 Button("再検出") {
                     scene.redetect()
                     line = ""
@@ -788,6 +801,125 @@ struct CameraTab: View {
         .padding()
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 14))
         .padding(.horizontal)
+    }
+
+    /// パネルのタブ
+    private enum MockTab {
+        case values
+        case diagnostics
+    }
+
+    /// 仮のセンサーの値の操作（D64-b）。
+    ///
+    /// **値を動かすと、植物の話す内容も変わる。**どの値に反応しているかを上に出し、
+    /// 説明員が「いま何を話しているのか」を確かめながら動かせるようにする
+    private var mockValues: some View {
+        let profile = model.profile(for: model.store.selectedPlant)
+        return VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(lineSourceLabel)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                Text(line.isEmpty ? "（植物を捉えていない）" : "「\(line)」")
+                    .font(.callout.weight(.bold))
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(10)
+            .background(.background, in: RoundedRectangle(cornerRadius: 10))
+
+            // 場面ごとに、まとめて切り替える
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 84), spacing: 6)], spacing: 6) {
+                ForEach(MockScene.all) { scene in
+                    Button(scene.name) { apply(scene) }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                }
+            }
+
+            Button {
+                waterMock()
+            } label: {
+                Label("水をあげる", systemImage: "drop.fill")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+
+            mockSlider(
+                "土壌水分", value: model.soilMoisture, in: 0...100, step: 1,
+                text: "\(Int(model.soilMoisture))%", range: profile.soilMoistureRange
+            ) {
+                model.updateMoisture($0)
+                // **鳴らさない。**動かすたびに帯域をまたぐので、
+                // 渇きと水を得た手応えが交互に鳴る
+                refreshLine(force: false, silent: true)
+            }
+            mockSlider(
+                "気温", value: model.environment.temperature, in: 0...40, step: 0.1,
+                text: String(format: "%.1f℃", model.environment.temperature), range: profile.tempRange
+            ) { model.environment.temperature = $0 }
+            mockSlider(
+                "湿度", value: model.environment.humidity, in: 0...100, step: 1,
+                text: "\(Int(model.environment.humidity))%", range: profile.humidityRange
+            ) { model.environment.humidity = $0 }
+            // 光の適正は積算光量で見る。明るさ（lux）から1日分に直して比べる
+            mockSlider(
+                "光量", value: model.environment.lightLux, in: 0...60_000, step: 100,
+                text: "\(Int(model.environment.lightLux).formatted()) lux",
+                level: Metrics.level(model.environment.dli, in: profile.dliRange)
+            ) { model.environment.lightLux = $0 }
+            mockSlider(
+                "EC（養分）", value: model.environment.nutrientEc, in: 0...3, step: 0.05,
+                text: String(format: "%.2f mS/cm", model.environment.nutrientEc), range: profile.ecRange
+            ) { model.environment.nutrientEc = $0 }
+            mockSlider(
+                "pH", value: model.environment.soilPh, in: 4...9, step: 0.1,
+                text: String(format: "%.1f", model.environment.soilPh), range: profile.soilPhRange
+            ) { model.environment.soilPh = $0 }
+        }
+    }
+
+    /// いまのセリフが何に反応しているか
+    private var lineSourceLabel: String {
+        guard case .plant = scene.subject, let condition = model.currentCondition() else { return "いまのセリフ" }
+        return "いまのセリフ（\(condition.topic.label)に反応）"
+    }
+
+    private func apply(_ scene: MockScene) {
+        if let moisture = scene.moisture { model.updateMoisture(moisture) }
+        scene.change(&model.environment)
+        refreshLine(force: false, silent: true)
+    }
+
+    private func mockSlider(
+        _ label: String, value: Double, in bounds: ClosedRange<Double>, step: Double, text: String,
+        range: ClosedRange<Double>?, set: @escaping (Double) -> Void
+    ) -> some View {
+        mockSlider(
+            label, value: value, in: bounds, step: step, text: text,
+            level: range.map { Metrics.level(value, in: $0) }, set: set)
+    }
+
+    /// 値ひとつ分のスライダー。**株の適正範囲から見た状態を横に出す**（低め・ちょうど良い・高め）
+    private func mockSlider(
+        _ label: String, value: Double, in bounds: ClosedRange<Double>, step: Double, text: String,
+        level: Metrics.Level?, set: @escaping (Double) -> Void
+    ) -> some View {
+        VStack(spacing: 0) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(label).foregroundStyle(.secondary)
+                if let level {
+                    Text(level.statusLabel)
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(level == .ok ? Color.green : Color.orange)
+                }
+                Spacer()
+                Text(text).monospacedDigit()
+            }
+            .font(.caption)
+            Slider(value: Binding(get: { value }, set: set), in: bounds, step: step)
+                .accessibilityLabel(label)
+                .accessibilityValue(text)
+        }
     }
 
     /// 名前の入力（D9）。入力するのは名前ひとつだけ。
@@ -1065,6 +1197,39 @@ private struct BubbleLayer: View {
             // ノッチのぶんだけ下にずれて植物から離れる。
             // キーボードで持ち上がらないのも同じ理由（`.all` に含まれる）
             .ignoresSafeArea()
+        }
+    }
+}
+
+/// 説明員用のパネルの場面（D64-b）。**値をまとめて切り替える。**
+/// 1つずつスライダーで動かすより、説明の流れに合わせて素早く切り替えられる
+private struct MockScene: Identifiable, Sendable {
+    let name: String
+    /// 土壌水分。nil なら変えない
+    var moisture: Double?
+    var change: @Sendable (inout MockEnvironment) -> Void = { _ in }
+
+    var id: String { name }
+
+    static let all: [MockScene] = [
+        MockScene(name: "水切れ", moisture: 15),
+        MockScene(name: "ちょうど良い", moisture: 45) { $0 = .initial },
+        MockScene(name: "暑い日") { $0.temperature = 34 },
+        MockScene(name: "寒い日") { $0.temperature = 14 },
+        MockScene(name: "暗い部屋") { $0.lightLux = 3_000 },
+        MockScene(name: "まぶしい") { $0.lightLux = 58_000 },
+        MockScene(name: "むしむし") { $0.humidity = 85 },
+        MockScene(name: "からから") { $0.humidity = 25 },
+    ]
+}
+
+extension Metrics.Level {
+    /// 適正範囲から見た状態の言い方。センサーの枠と説明員用のパネルで同じ言葉を使う
+    var statusLabel: String {
+        switch self {
+        case .low: "低め"
+        case .ok: "ちょうど良い"
+        case .high: "高め"
         }
     }
 }

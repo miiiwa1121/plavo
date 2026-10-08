@@ -58,7 +58,7 @@ public struct DialogueBank: Sendable {
 
     // MARK: - 保持するもの
 
-    public struct Band: Sendable {
+    public struct Band: Sendable, Equatable {
         public let key: String
         public let label: String
         public let range: ClosedRange<Double>?

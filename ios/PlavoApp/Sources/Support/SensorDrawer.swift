@@ -67,15 +67,18 @@ struct SensorDrawer: View {
     private static let bottomInset: CGFloat = 28 + ShutterBar.bigSize + 24
     private static let cornerRadius: CGFloat = 28
 
-    /// 枠に出す値。**土壌水分は説明員用の隠し操作と同じ値**（植物を捉えているあいだ乾き、「水をあげる」で上がる）。
+    /// 枠に出す値。**すべて説明員用のパネルの値と同じ**（D64-b）。
     /// 吹き出しのセリフと枠の数字が食い違わない
     private var readings: SensorReadings? {
-        tagDetected ? SensorReadings(soilMoisture: model.soilMoisture) : nil
+        tagDetected ? SensorReadings(model: model) : nil
     }
 
     private var tint: Color { EdgeChrome.tint(light: lightChrome) }
     private var textColor: Color { EdgeChrome.text(light: lightChrome) }
     private var strongColor: Color { EdgeChrome.strongText(light: lightChrome) }
+    private var okColor: Color { EdgeChrome.ok(light: lightChrome) }
+    private var warnColor: Color { EdgeChrome.warn(light: lightChrome) }
+    private var trackColor: Color { EdgeChrome.track(light: lightChrome) }
 
     /// つまみと、開き切った枠の置き場所。どちらも右端に付く
     private struct Layout {
@@ -273,52 +276,36 @@ struct SensorDrawer: View {
             }
         }
         .padding(.horizontal, 22)
-        .padding(.vertical, 24)
+        .padding(.top, 22)
+        .padding(.bottom, 18)
         // 札が見えた・見えなくなった、の切り替わりを滑らかに
         .animation(.easeInOut(duration: 0.2), value: readings == nil)
     }
 
-    /// 届いている値を並べる。**土壌水分を先頭に大きく出す。**展示の筋書き（水切れ→水やり→回復）の主役
-    private func readingsView(_ readings: SensorReadings) -> some View {
-        VStack(alignment: .leading, spacing: 18) {
+    /// 値を図にして並べる（D64-b・見本の A メーター型）。
+    ///
+    /// **土壌水分を先頭に円のメーターで大きく出す。**展示の筋書き（水切れ→水やり→回復）の主役。
+    /// ほかの値は1行ずつ、株の「ちょうど良い範囲」を緑の帯で塗り、いまの値を印で示す。
+    /// 範囲から外れたら、印と言葉（低め・高め）を橙にする
+    private func readingsView(_ r: SensorReadings) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
             header
 
-            VStack(alignment: .leading, spacing: 4) {
-                Text(label(.soilMoisture))
-                    .font(.subheadline)
-                    .foregroundStyle(textColor)
-                HStack(alignment: .firstTextBaseline, spacing: 4) {
-                    Text(format(readings.soilMoisture, .soilMoisture))
-                        .font(.system(size: 44, weight: .semibold, design: .rounded))
-                        .foregroundStyle(strongColor)
-                        .contentTransition(.numericText())
-                    Text(unit(.soilMoisture))
-                        .font(.title3.weight(.medium))
-                        .foregroundStyle(textColor)
-                }
-                .animation(.default, value: readings.soilMoisture)
-            }
+            moistureBlock(r)
 
             Rectangle()
-                .fill(textColor.opacity(0.3))
+                .fill(textColor.opacity(0.25))
                 .frame(height: 0.5)
 
             VStack(spacing: 12) {
-                row(.lightLux, readings.lightLux)
-                row(.temperature, readings.temperature)
-                row(.humidity, readings.humidity)
-                row(.nutrientEc, readings.nutrientEc)
-                readingRow("電池", readings.battery.formatted(.number.precision(.fractionLength(0))), "%")
+                ForEach(r.rows) { row in
+                    rangeRow(row)
+                }
             }
 
             Spacer(minLength: 0)
 
-            // 仮のデータなので、いまの時刻を出す。土壌水分が止まっていても時刻は進める
-            TimelineView(.periodic(from: .now, by: 1)) { context in
-                Text("計測 \(context.date.formatted(date: .omitted, time: .standard))")
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(textColor)
-            }
+            footer(r)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
@@ -327,7 +314,7 @@ struct SensorDrawer: View {
     private var header: some View {
         HStack(spacing: 8) {
             Circle()
-                .fill(Color.accentColor)
+                .fill(okColor)
                 .frame(width: 8, height: 8)
             Text(model.store.selectedPlant?.name ?? "センサー")
                 .font(.headline)
@@ -339,45 +326,282 @@ struct SensorDrawer: View {
         }
     }
 
-    private func row(_ id: MetricID, _ value: Double) -> some View {
-        readingRow(label(id), format(value, id), unit(id))
-    }
+    // MARK: - 土壌水分
 
-    private func readingRow(_ label: String, _ value: String, _ unit: String) -> some View {
-        HStack(alignment: .firstTextBaseline) {
-            Text(label)
-                .foregroundStyle(textColor)
-            Spacer()
-            Text(value)
-                .monospacedDigit()
-                .foregroundStyle(strongColor)
-            Text(unit)
-                .font(.caption)
-                .foregroundStyle(textColor)
-                .frame(width: 44, alignment: .leading)
+    private func moistureBlock(_ r: SensorReadings) -> some View {
+        let level = Metrics.level(r.soilMoisture, in: r.profile.soilMoistureRange)
+        let color = level == .ok ? okColor : warnColor
+        return HStack(spacing: 16) {
+            MoistureGauge(
+                value: r.soilMoisture, range: r.profile.soilMoistureRange,
+                valueColor: color, bandColor: okColor.opacity(0.38), trackColor: trackColor,
+                textColor: strongColor, labelColor: textColor)
+                .frame(width: 112, height: 112)
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text(r.moistureStatus)
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(color)
+                    .padding(.horizontal, 10).padding(.vertical, 3)
+                    .background(color.opacity(0.2), in: Capsule())
+                caption("適正", "\(Int(r.profile.soilMoistureRange.lowerBound))〜\(Int(r.profile.soilMoistureRange.upperBound))%")
+                caption("最後の水やり", r.lastWateredText)
+                caption("次の水やり", r.nextWateringText, emphasis: r.needsWaterNow ? warnColor : nil)
+            }
         }
-        .font(.callout)
     }
 
-    // MARK: - 表記
+    private func caption(_ label: String, _ value: String, emphasis: Color? = nil) -> some View {
+        HStack(spacing: 4) {
+            Text(label).foregroundStyle(textColor)
+            Text(value)
+                .fontWeight(emphasis == nil ? .medium : .bold)
+                .foregroundStyle(emphasis ?? strongColor)
+        }
+        .font(.caption)
+    }
 
-    /// 名前と単位と桁は育成のグラフと同じもの（MetricCatalog）を使う。画面によって呼び方が変わらないように
-    private func label(_ id: MetricID) -> String { MetricCatalog.definition(id)?.label ?? "" }
-    private func unit(_ id: MetricID) -> String { MetricCatalog.definition(id)?.unit ?? "" }
-    private func format(_ value: Double, _ id: MetricID) -> String {
-        value.formatted(.number.precision(.fractionLength(MetricCatalog.definition(id)?.fractionDigits ?? 0)))
+    // MARK: - 範囲の帯
+
+    private func rangeRow(_ row: SensorReadings.Row) -> some View {
+        let color = row.level == .ok ? okColor : warnColor
+        return VStack(alignment: .leading, spacing: 5) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(row.label)
+                    .font(.footnote)
+                    .foregroundStyle(textColor)
+                if let level = row.level {
+                    Text(level.statusLabel)
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(color)
+                }
+                Spacer()
+                Text(row.valueText)
+                    .font(.subheadline.weight(.semibold))
+                    .monospacedDigit()
+                    .foregroundStyle(strongColor)
+                Text(row.unit)
+                    .font(.caption2)
+                    .foregroundStyle(textColor)
+                    .frame(width: 44, alignment: .leading)
+            }
+            RangeBar(
+                value: row.value, domain: row.domain, range: row.range,
+                markerColor: row.level == nil ? strongColor : color, markerFill: strongColor,
+                bandColor: okColor.opacity(0.38), trackColor: trackColor)
+                .frame(height: 6)
+            if let note = row.note {
+                Text(note)
+                    .font(.caption2)
+                    .foregroundStyle(textColor)
+                    // 帯の印（帯より上下に3ptはみ出す）に文字が掛からないように
+                    .padding(.top, 2)
+            }
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    // MARK: - 下の段
+
+    private func footer(_ r: SensorReadings) -> some View {
+        Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 6) {
+            GridRow {
+                caption("開花まで", r.bloomText)
+                caption("日長", String(format: "%.1f時間", MockEnvironment.dayLengthHours))
+            }
+            GridRow {
+                caption("電池", "\(Int(r.battery))%")
+                // 仮のデータなので、いまの時刻を出す。値が止まっていても時刻は進める
+                TimelineView(.periodic(from: .now, by: 1)) { context in
+                    caption("計測", context.date.formatted(date: .omitted, time: .standard))
+                }
+            }
+        }
     }
 }
 
-/// 枠に出す値（D64-a）。**すべて仮のデータで、サーバーは使わない。**
+/// 土壌水分の円のメーター。**4分の3周の弧**で、適正範囲を緑の帯で敷き、いまの値まで色を塗る
+private struct MoistureGauge: View {
+    let value: Double
+    let range: ClosedRange<Double>
+    let valueColor: Color
+    let bandColor: Color
+    let trackColor: Color
+    let textColor: Color
+    let labelColor: Color
+
+    /// 弧が占める割合（4分の3周）
+    private let sweep = 0.75
+
+    var body: some View {
+        ZStack {
+            arc(from: 0, to: 1).stroke(trackColor, style: StrokeStyle(lineWidth: 10, lineCap: .round))
+            arc(from: range.lowerBound / 100, to: range.upperBound / 100)
+                .stroke(bandColor, style: StrokeStyle(lineWidth: 10))
+            arc(from: 0, to: min(1, max(0, value / 100)))
+                .stroke(valueColor, style: StrokeStyle(lineWidth: 10, lineCap: .round))
+                .animation(.easeOut(duration: 0.3), value: value)
+            VStack(spacing: 0) {
+                HStack(alignment: .firstTextBaseline, spacing: 2) {
+                    Text("\(Int(value.rounded()))")
+                        .font(.system(size: 32, weight: .bold, design: .rounded))
+                        .monospacedDigit()
+                        .contentTransition(.numericText())
+                        .animation(.default, value: Int(value.rounded()))
+                    Text("%")
+                        .font(.subheadline)
+                        .foregroundStyle(labelColor)
+                }
+                .foregroundStyle(textColor)
+                Text("土壌水分")
+                    .font(.caption2)
+                    .foregroundStyle(labelColor)
+            }
+        }
+        .padding(5)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("土壌水分 \(Int(value.rounded()))パーセント")
+    }
+
+    /// 割合 a〜b の弧。左下（135°）から時計回りに4分の3周
+    private func arc(from a: Double, to b: Double) -> some Shape {
+        Circle()
+            .trim(from: a * sweep, to: b * sweep)
+            .rotation(.degrees(135))
+    }
+}
+
+/// 範囲の帯。下地の上に「ちょうど良い範囲」を塗り、いまの値に印を置く
+private struct RangeBar: View {
+    let value: Double
+    let domain: ClosedRange<Double>
+    let range: ClosedRange<Double>?
+    let markerColor: Color
+    let markerFill: Color
+    let bandColor: Color
+    let trackColor: Color
+
+    var body: some View {
+        GeometryReader { geo in
+            let width = geo.size.width
+            let x = { (v: Double) in
+                CGFloat((min(domain.upperBound, max(domain.lowerBound, v)) - domain.lowerBound)
+                    / (domain.upperBound - domain.lowerBound)) * width
+            }
+            ZStack(alignment: .leading) {
+                Capsule().fill(trackColor)
+                if let range {
+                    Capsule()
+                        .fill(bandColor)
+                        .frame(width: x(range.upperBound) - x(range.lowerBound))
+                        .offset(x: x(range.lowerBound))
+                }
+                Circle()
+                    .fill(markerFill)
+                    .overlay(Circle().stroke(markerColor, lineWidth: 3))
+                    .frame(width: 12, height: 12)
+                    .offset(x: x(value) - 6)
+                    .animation(.easeOut(duration: 0.3), value: value)
+            }
+        }
+    }
+}
+
+/// 枠に出す値（D64-a / D64-b）。**すべて仮のデータで、サーバーは使わない。**
 ///
-/// 土壌水分だけは動く（説明員用の隠し操作の値）。ほかは固定で、
-/// 以前のモックのガジェット（server/src/sensor/mock-gadget.ts）と同じ値
+/// 値は説明員用のパネルで動かすもの（`AppModel.soilMoisture`・`AppModel.environment`）。
+/// 適正範囲は、見ている株の種のもの（`PlantProfile`）
+@MainActor
 struct SensorReadings: Equatable {
     var soilMoisture: Double
-    var lightLux: Double = 12_400
-    var temperature: Double = 24.6
-    var humidity: Double = 52.1
-    var nutrientEc: Double = 1.4
+    var environment: MockEnvironment
+    var profile: PlantProfile
+    var lastWateredAt: Date?
+    var daysGrown: Int
+    var stage: GrowthStage?
     var battery: Double = 87
+
+    init(model: AppModel) {
+        soilMoisture = model.soilMoisture
+        environment = model.environment
+        let plant = model.store.selectedPlant
+        profile = model.profile(for: plant)
+        lastWateredAt = model.lastWateredAt
+        daysGrown = plant.map { model.store.daysTogether($0) } ?? 0
+        stage = plant.flatMap { model.store.stage(of: $0.id) }
+    }
+
+    struct Row: Identifiable {
+        let label: String
+        let valueText: String
+        let unit: String
+        let value: Double
+        /// 帯の端から端
+        let domain: ClosedRange<Double>
+        /// ちょうど良い範囲。種が持っていなければ nil（帯を塗らず、状態も出さない）
+        let range: ClosedRange<Double>?
+        var note: String?
+        var id: String { label }
+        var level: Metrics.Level? { range.map { Metrics.level(value, in: $0) } }
+    }
+
+    /// 土壌水分の下に並べる行。名前と単位は育成のグラフ（MetricCatalog）と同じ
+    var rows: [Row] {
+        let e = environment
+        func def(_ id: MetricID) -> MetricDefinition? { MetricCatalog.definition(id) }
+        return [
+            Row(label: "気温", valueText: String(format: "%.1f", e.temperature), unit: def(.temperature)?.unit ?? "℃",
+                value: e.temperature, domain: 0...40, range: profile.tempRange),
+            Row(label: "湿度", valueText: "\(Int(e.humidity.rounded()))", unit: "%",
+                value: e.humidity, domain: 0...100, range: profile.humidityRange),
+            Row(label: "積算光量", valueText: String(format: "%.1f", e.dli), unit: "mol/m²",
+                value: e.dli, domain: 0...40, range: profile.dliRange,
+                note: "いま \(Int(e.lightLux).formatted()) lux・今日浴びた光の合計"),
+            Row(label: def(.nutrientEc)?.label ?? "EC", valueText: String(format: "%.2f", e.nutrientEc),
+                unit: def(.nutrientEc)?.unit ?? "mS/cm", value: e.nutrientEc, domain: 0...3, range: profile.ecRange),
+            Row(label: "pH", valueText: String(format: "%.1f", e.soilPh), unit: "",
+                value: e.soilPh, domain: 4...9, range: profile.soilPhRange),
+        ]
+    }
+
+    /// 土壌水分の状態。言葉は育成のグラフと同じ（乾き気味・湿り気味）
+    var moistureStatus: String {
+        let def = MetricCatalog.definition(.soilMoisture)
+        switch Metrics.level(soilMoisture, in: profile.soilMoistureRange) {
+        case .low: return def?.lowLabel ?? "乾き気味"
+        case .ok: return "ちょうど良い"
+        case .high: return def?.highLabel ?? "湿り気味"
+        }
+    }
+
+    var lastWateredText: String {
+        guard let lastWateredAt else { return "まだ" }
+        let seconds = Date().timeIntervalSince(lastWateredAt)
+        if seconds < 60 { return "たった今" }
+        if seconds < 3600 { return "\(Int(seconds / 60))分前" }
+        return "\(Int(seconds / 3600))時間前"
+    }
+
+    /// 水やりが要る線（種の下限）を下回っているか
+    var needsWaterNow: Bool { soilMoisture <= profile.soilMoistureFloor }
+
+    /// 次に水やりが要るまで。**モックの乾く速さで見積もる**（展示用に速めてあるので、秒や分の単位になる）
+    var nextWateringText: String {
+        if needsWaterNow { return "いますぐ" }
+        let seconds = (soilMoisture - profile.soilMoistureFloor) / AppModel.mockDryingRate
+        if seconds < 60 { return "あと約\(Int(seconds.rounded()))秒" }
+        return "あと約\(Int((seconds / 60).rounded()))分"
+    }
+
+    var bloomText: String {
+        if stage == .withered { return "—" }
+        if let stage, let i = GrowthStage.order.firstIndex(of: stage), let bloom = GrowthStage.order.firstIndex(of: .bloom),
+            i >= bloom
+        {
+            return "咲いています"
+        }
+        guard let days = Metrics.daysToBloom(daysGrown: daysGrown, temperature: environment.temperature, profile: profile)
+        else { return "—" }
+        return days == 0 ? "もうすぐ" : "あと\(days)日"
+    }
 }
