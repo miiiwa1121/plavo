@@ -30,3 +30,6 @@ server/fixtures/images/*
 # エディタ
 .vscode/
 .idea/
+
+# センサーの札の色を決めた動画（約100MB）。リポジトリには入れず、手元に置く（D64-a）
+reference/sensor_mock/*.mp4
