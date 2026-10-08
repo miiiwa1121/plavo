@@ -14,7 +14,7 @@ import {
 } from "remotion";
 import { createContext, useContext } from "react";
 import { colors, font } from "../theme";
-import { actNames, comments, overview, overviewCaption, sources } from "./cuts";
+import { actNames, comments, introCaption, overview, overviewCaption, sources } from "./cuts";
 import { landscape, portrait, type Layout } from "./layout";
 import { PresenterBubble, PresenterCharacter } from "./Presenter";
 import {
@@ -99,7 +99,7 @@ const Tour: React.FC = () => {
       <Header opacity={shown} />
       <CameraNote />
       <Overview />
-      <Title from={0} until={INTRO_END} />
+      <Title from={0} until={INTRO_END} caption={introCaption} />
       <Title from={OUTRO_START} until={Infinity} />
       <Soundtrack />
     </AbsoluteFill>
@@ -734,20 +734,49 @@ const Overview: React.FC = () => {
 
 // MARK: - タイトル
 
-/** アプリのタイトルの絵（TitleScreen）をそのまま使う。ロゴは絵の中ほどにある */
-const Title: React.FC<{ from: number; until: number }> = ({ from, until }) => {
+/**
+ * タイトル。終わりはアプリのタイトルの絵（TitleScreen・ロゴは絵の中ほど）をそのまま使う。
+ * はじめは**ロゴを消した同じ背景**（title-bg.png）に、一言（introCaption）を出す。
+ * title-bg.png は title.png のロゴの四角を ffmpeg の delogo で周りの色から埋めて作った
+ */
+const Title: React.FC<{ from: number; until: number; caption?: string }> = ({ from, until, caption }) => {
+  const layout = useLayout();
   const frame = useCurrentFrame();
+  const { fps } = useVideoConfig();
   const appear = interpolate(frame, [from, from + 14], [from === 0 ? 1 : 0, 1], clamp);
   const leave = until === Infinity ? 0 : interpolate(frame, [until - 12, until + 4], [0, 1], clamp);
   const opacity = appear * (1 - leave);
   if (opacity <= 0) return null;
   const drift = interpolate(frame, [from, from + 150], [1.08, 1], clamp);
+  // 一言は少し置いてから、弾んで出る
+  const pop = spring({ frame: frame - from - 6, fps, config: { damping: 12, mass: 0.7 } });
+  const text = caption && layout.intro.oneLine ? caption.replace("\n", "") : caption;
   return (
     <AbsoluteFill style={{ opacity }}>
       <Img
-        src={staticFile("title.png")}
+        src={staticFile(caption ? "title-bg.png" : "title.png")}
         style={{ width: "100%", height: "100%", objectFit: "cover", transform: `scale(${drift})` }}
       />
+      {text && (
+        <AbsoluteFill style={{ alignItems: "center", justifyContent: "center" }}>
+          <div
+            style={{
+              whiteSpace: "pre-line",
+              textAlign: "center",
+              fontSize: layout.intro.fontSize,
+              fontWeight: 800,
+              lineHeight: 1.3,
+              letterSpacing: 4,
+              color: "white",
+              textShadow: "0 6px 28px rgba(30, 80, 20, 0.35)",
+              opacity: interpolate(pop, [0, 0.4], [0, 1], clamp),
+              transform: `scale(${0.85 + 0.15 * pop})`,
+            }}
+          >
+            {text}
+          </div>
+        </AbsoluteFill>
+      )}
     </AbsoluteFill>
   );
 };

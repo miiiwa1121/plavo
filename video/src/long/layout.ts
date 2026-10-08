@@ -51,6 +51,8 @@ export type Layout = {
       tailOffset: number;
     };
   };
+  /** はじめのタイトルの一言（introCaption）。oneLine なら改行を外して1行で出す */
+  intro: { fontSize: number; oneLine: boolean };
   /** 「※ カメラの映像はイメージです」の中心 */
   note: { centerX: number; bottom: number };
   overview: {
@@ -95,6 +97,7 @@ export const portrait: Layout = {
     presenter: { left: 110, top: 296, width: 118 },
     bubble: { left: 262, top: 306, maxWidth: 720, minWidth: 0, fontSize: 38, tail: "left", tailOffset: 34 },
   },
+  intro: { fontSize: 112, oneLine: false },
   note: { centerX: 540, bottom: 28 },
   overview: { columns: 3, rows: 2, miniWidth: 300, bezel: 8, gap: 32, captionTop: 150, captionSize: 58, gridTop: 400 },
 };
@@ -134,6 +137,7 @@ export const landscape: Layout = {
     // 幅は13字まで1行に収まる（「今の状態が丸わかりだね！」は12字）。途中で折り返すと語の途中で切れる
     bubble: { right: 40, bottom: 1080 - 640 + 50, maxWidth: 660, minWidth: 0, fontSize: 40, tail: "bottom", tailOffset: 200 },
   },
+  intro: { fontSize: 112, oneLine: true },
   note: { centerX: L.centerX, bottom: 20 },
   overview: { columns: 6, rows: 1, miniWidth: 244, bezel: 7, gap: 30, captionTop: 130, captionSize: 60, gridTop: 330 },
 };

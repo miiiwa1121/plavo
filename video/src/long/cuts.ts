@@ -192,6 +192,9 @@ export const overview: { source: Source; from: number; to: number }[] = [
   { source: "tour", from: 78.9, to: 81.8 },
 ];
 
+/** はじめのタイトルの一言。ロゴを消した背景の上に出す。縦画面は \n で2行にする（横画面は1行） */
+export const introCaption = "Plavoアプリ\n紹介動画！☘️";
+
 /** 画面を並べる場面の語り手の一言 */
 export const overviewCaption = "植物との毎日を、ひとつのアプリに";
 
