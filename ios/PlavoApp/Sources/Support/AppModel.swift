@@ -44,6 +44,9 @@ final class AppModel {
     /// センサー中継サーバーからの取得。繋がらなくてもアプリは成立する
     let sensor = SensorClient()
 
+    /// 電池と熱と、重い処理の回数（非機能要件 §2.3）。説明員用のパネルの「AR の診断」に出す
+    let energy = EnergyMonitor()
+
     /// 植物・観察・日記。展示では永続化しない（D36）
     let store: PlantStore
 

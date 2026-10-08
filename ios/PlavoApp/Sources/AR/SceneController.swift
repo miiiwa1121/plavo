@@ -76,6 +76,16 @@ final class SceneController: NSObject {
     /// 確認から戻ったときに画面が固まって見える。
     var isDetectionSuspended = false
 
+    /// カメラの映像が、全面を覆う画面（今日の写真）の裏に隠れているか。
+    ///
+    /// **見えていない映像で、植物の検出と札の検索を回さない。**どちらも Vision や
+    /// Core Image を使う重い処理で、発熱と電池に効く（9/23 の発熱のレビュー）。
+    /// `isDetectionSuspended` とは分ける。あちらは撮った1枚の確認の間の止め方で、
+    /// 確認を終えると解く。覆いが残っているのに、確認の側が解いてしまわないように
+    ///
+    /// **相手と札の状態は残す。**セッションも回したまま。覆いを閉じたら、そのまま続きから見える
+    var isCovered = false
+
     /// 直近の検出にかかった時間。デバッグと間隔の調整に使う
     private(set) var lastDetectionDuration: TimeInterval = 0
 
@@ -668,6 +678,7 @@ final class SceneController: NSObject {
                 guard let self else { return }
                 self.isDetecting = false
                 self.adaptInterval(lastDuration: elapsed)
+                self.model?.energy.recordDetection(duration: elapsed)
                 self.detectionAttempts += 1
                 self.topLabels = outcome.labels
                 self.plantScore = outcome.plantScore
@@ -1191,6 +1202,8 @@ extension SceneController: ARSessionDelegate {
         Task { @MainActor in
             self.updateDiagnostics(frame)
             self.project(frame)
+            // 覆われている間は、重い2つ（札の検索・植物の検出）を回さない
+            guard !self.isCovered else { return }
             self.scanSensorTag(in: frame)
             guard !self.isDetectionSuspended, self.canDetectPlant else { return }
             // トラッキングが安定するまで検出しない。
@@ -1429,12 +1442,15 @@ extension SceneController {
         let detector = sensorTagDetector
 
         Task.detached(priority: .utility) { [weak self] in
+            let started = CFAbsoluteTimeGetCurrent()
             let found = Self.findSensorTag(
                 in: pixelBuffer, orientation: orientation, viewSize: viewSize, near: plantBox,
                 detector: detector)
+            let elapsed = CFAbsoluteTimeGetCurrent() - started
             await MainActor.run {
                 guard let self else { return }
                 self.isScanningSensorTag = false
+                self.model?.energy.recordTagScan(duration: elapsed)
                 // 探しているあいだに相手を見失っていたら、結果は捨てる
                 guard self.subject == .plant else { return }
                 self.sensorTagVisible = self.sensorTagTracker.update(seen: found, at: now)

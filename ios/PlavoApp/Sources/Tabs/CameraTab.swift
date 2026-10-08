@@ -213,6 +213,10 @@ struct CameraTab: View {
             line = ""
         }
         .onReceive(tick) { _ in dryIfMocked() }
+        // 今日の写真を開いている間、映像は裏に隠れる。見えない映像で重い処理を回さない
+        .onChange(of: expandedPhoto != nil, initial: true) { _, covered in
+            scene.isCovered = covered
+        }
         // 説明員が気温・湿度・光量などを動かしたら、話す内容も変わる（D64-b）。
         // 帯域が変わったときだけ引き直すので、スライダーを動かしている最中にちらつかない
         .onChange(of: model.environment) { _, _ in
@@ -1038,6 +1042,8 @@ struct CameraTab: View {
                 .frame(width: 170)
             }
             row("セッション", scene.isRunning ? "稼働中" : "停止中")
+            energyRows
+            Divider().padding(.vertical, 2)
             row("周囲の明るさ", String(format: "%.2f", scene.ambientBrightness))
             row("トラッキング", scene.trackingDescription)
             row("特徴点", "\(scene.featurePointCount)")
@@ -1127,6 +1133,31 @@ struct CameraTab: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(10)
         .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    /// 電池と熱（非機能要件 §2.3）。10分使ったあとにここを画面写真に撮れば、目標と照らし合わせられる。
+    ///
+    /// **経過時間を進めるために、5秒ごとに描き直す。**パネルを開いている間だけ
+    private var energyRows: some View {
+        let energy = model.energy
+        return TimelineView(.periodic(from: .now, by: 5)) { context in
+            let now = context.date
+            VStack(alignment: .leading, spacing: 3) {
+                Divider().padding(.vertical, 2)
+                HStack {
+                    Text("電池と熱").foregroundStyle(.secondary)
+                    Spacer()
+                    Text("計測 \(EnergyMonitor.duration(energy.elapsed(at: now)))")
+                    Button("やり直す") { energy.reset() }
+                        .buttonStyle(.bordered)
+                        .controlSize(.mini)
+                }
+                row("電池", energy.batteryText(at: now))
+                row("熱", energy.thermalText(at: now))
+                row("植物の検出", energy.detectionText(at: now))
+                row("札の検索", energy.tagScanText(at: now))
+            }
+        }
     }
 
     private func row(_ label: String, _ value: String) -> some View {
