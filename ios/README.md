@@ -4,7 +4,7 @@ plavo の iOS 実装。技術スタックは Swift + SwiftUI + ARKit + Vision + 
 
 | ディレクトリ | 内容 | 状態 |
 |---|---|---|
-| [PlavoCore/](./PlavoCore/) | ドメイン層の Swift Package。UI にも AR にも依存しない | **動作する。105件のテストが通る** |
+| [PlavoCore/](./PlavoCore/) | ドメイン層の Swift Package。UI にも AR にも依存しない | **動作する。112件のテストが通る** |
 | PlavoApp/ | アプリ本体（タブ・AR・カメラ） | 未着手 |
 
 ## PlavoCore
@@ -29,6 +29,7 @@ swift test
 | `PhotoGridLayout.swift` | プロフィールの写真の並び（2本指で列が変わる）の配置の計算 |
 | `Social.swift` | 友達・日記の3区分・反応（D61〜D63）。公開範囲、どの日記に並ぶか・コメントと共有の可否、スタンプ（1人1個）、流すスタンプの数と時刻 |
 | `Talk.swift` | トーク（D59）。おうち・メンバー・チャットと、その規則（株は1つのおうちにだけ入る・履歴は参加した時点から・写真の知らせのまとめ方） |
+| `MockSensor.swift` | 説明員が操作する仮のセンサーの値（D64-b）。積算光量と開花までの日数の近似、セリフが反応する値の決め方（土壌水分 → 光 → 気温 → 湿度） |
 | `SensorTag.swift` | センサーの札の検出（D64-a）。札の色（赤）・植物の近くで画面の端に接していない赤い塊を探す規則・「続けて1秒で出し、2秒見失って消す」の出し入れ |
 | `TimeSpan.swift` | 時間の長さ（分・時・日・週）の秒数。`86_400` のような数字を式に直接書かないため |
 
@@ -50,7 +51,7 @@ server/fixtures/sensors/*.json
 
 ### セリフのプールとの結びつき
 
-`DialogueBank` は `content/dialogues/` を読む。テストは**本数が117本であること**を検証している。`server` の `npm run check:dialogues` が数える本数と一致するため、片方だけ更新されたら気づける。
+`DialogueBank` は `content/dialogues/` を読む。テストは**本数が123本であること**を検証している。`server` の `npm run check:dialogues` が数える本数と一致するため、片方だけ更新されたら気づける。
 
 ## 設計上の判断
 
