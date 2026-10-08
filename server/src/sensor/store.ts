@@ -20,7 +20,13 @@ export type SensorPayload = {
 /** 1秒に1回×数時間を想定し、それを超えたら古いものから捨てる */
 const MAX_POINTS_PER_GADGET = 60 * 60 * 6;
 
-const store = new Map<string, SensorPayload[]>();
+/**
+ * 受信した1点と、`measuredAt` を数値にしたもの。
+ * **`recent` と `latest` が呼ばれるたびに ISO 文字列を読み直さない**（アプリは1秒ごとに取りに来る）
+ */
+type Stored = { payload: SensorPayload; at: number };
+
+const store = new Map<string, Stored[]>();
 
 export type ValidationError = { field: string; reason: string };
 
@@ -82,7 +88,7 @@ export function validate(body: unknown): ValidationError[] {
 
 export function record(payload: SensorPayload): void {
   const list = store.get(payload.gadgetId) ?? [];
-  list.push(payload);
+  list.push({ payload, at: Date.parse(payload.measuredAt) });
   if (list.length > MAX_POINTS_PER_GADGET) {
     list.splice(0, list.length - MAX_POINTS_PER_GADGET);
   }
@@ -90,30 +96,30 @@ export function record(payload: SensorPayload): void {
 }
 
 export function latest(gadgetId?: string): SensorPayload | null {
-  if (gadgetId) return store.get(gadgetId)?.at(-1) ?? null;
+  if (gadgetId) return store.get(gadgetId)?.at(-1)?.payload ?? null;
   // 指定がなければ、最後に更新されたものを返す。展示では1台しか使わない
-  let newest: SensorPayload | null = null;
+  let newest: Stored | null = null;
   for (const list of store.values()) {
     const last = list.at(-1);
     if (!last) continue;
-    if (!newest || Date.parse(last.measuredAt) > Date.parse(newest.measuredAt)) {
-      newest = last;
-    }
+    if (!newest || last.at > newest.at) newest = last;
   }
-  return newest;
+  return newest?.payload ?? null;
 }
 
 export function recent(gadgetId: string, seconds: number): SensorPayload[] {
   const list = store.get(gadgetId) ?? [];
   const cutoff = Date.now() - seconds * 1000;
-  return list.filter((p) => Date.parse(p.measuredAt) >= cutoff);
+  const out: SensorPayload[] = [];
+  for (const p of list) if (p.at >= cutoff) out.push(p.payload);
+  return out;
 }
 
 export function gadgets(): { gadgetId: string; points: number; lastSeen: string }[] {
   return [...store.entries()].map(([gadgetId, list]) => ({
     gadgetId,
     points: list.length,
-    lastSeen: list.at(-1)?.measuredAt ?? "—",
+    lastSeen: list.at(-1)?.payload.measuredAt ?? "—",
   }));
 }
 

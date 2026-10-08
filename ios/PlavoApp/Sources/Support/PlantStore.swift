@@ -152,6 +152,10 @@ final class PlantStore {
         }
         observations[plant.id] = obs
 
+        // 日 → diary の添字。**日ごとに diary を頭から探すと日数の二乗で掛かる**
+        // （`Calendar.isDate` が重く、起動を削る）ので、仕込みの間だけ辞書で引く
+        var dayIndex = Self.dayIndex(of: diary)
+
         // **日記は1日1ページ。書かなかった日もページを作る**（D18-a）。
         // 何も無いページは日記には並べない（DiaryTab）が、ページそのものは持っておく。
         // **株では分けない。**同じ日に別の株のページがあれば、そこへ足す（`addToDay`）
@@ -174,6 +178,7 @@ final class PlantStore {
                     nil
                 }
             addToDay(
+                into: &dayIndex,
                 DiaryEntry(
                     plantId: plant.id,
                     date: date,
@@ -189,7 +194,7 @@ final class PlantStore {
                             look: plan.look, of: plant.id),
                     author: written?.author ?? .user))
         }
-        seedFlipbook(plan, plantId: plant.id, plantedAt: plantedAt)
+        seedFlipbook(plan, plantId: plant.id, plantedAt: plantedAt, dayIndex: dayIndex)
         diary.sort { $0.date > $1.date }
     }
 
@@ -202,12 +207,14 @@ final class PlantStore {
     /// **絵は起動を待たせずに、あとから1枚ずつ描く。**1株26〜30枚で、起動時にまとめて描くと
     /// シミュレータでも 0.13 秒ほど延びた（F-01 の「2秒以内にカメラ」を削る）。
     /// 描き上がるまでは、マスが無地のまま出る
-    private func seedFlipbook(_ plan: SeedPlan, plantId: UUID, plantedAt: Date) {
+    private func seedFlipbook(
+        _ plan: SeedPlan, plantId: UUID, plantedAt: Date, dayIndex: [Date: Int]
+    ) {
         var pending: [(ref: String, day: Int)] = []
         for day in stride(from: 1, through: max(1, plan.days), by: 3) {
             guard let date = Calendar.current.date(byAdding: .day, value: day, to: plantedAt),
                 !Calendar.current.isDateInToday(date),
-                let i = diary.firstIndex(where: { Calendar.current.isDate($0.date, inSameDayAs: date) })
+                let i = dayIndex[Calendar.current.startOfDay(for: date)]
             else { continue }
             let ref = UUID().uuidString
             seededPhotoRefs.insert(ref)
@@ -228,6 +235,18 @@ final class PlantStore {
         }
     }
 
+    /// 日（0時）から添字を引く辞書。同じ日が重なっていれば先のページを取る（`firstIndex` と同じ）
+    private static func dayIndex(of diary: [DiaryEntry]) -> [Date: Int] {
+        let calendar = Calendar.current
+        var index: [Date: Int] = [:]
+        index.reserveCapacity(diary.count)
+        for (i, entry) in diary.enumerated() {
+            let day = calendar.startOfDay(for: entry.date)
+            if index[day] == nil { index[day] = i }
+        }
+        return index
+    }
+
     /// その日のページに足す。**日記は1日1ページで、株では分けない。**
     ///
     /// 仕込みは株ごとに筋書きを持つので、2株が同じ日に書いていることがある。
@@ -236,12 +255,12 @@ final class PlantStore {
     ///
     /// ページの主役（見出しの N日目・段階と、引用）は、先にそのページで書いていた株のまま。
     /// 先のページが空なら、書いたほうを主役にする
-    private func addToDay(_ entry: DiaryEntry) {
-        guard
-            let i = diary.firstIndex(where: {
-                Calendar.current.isDate($0.date, inSameDayAs: entry.date)
-            })
-        else {
+    ///
+    /// `dayIndex` は日（0時）から `diary` の添字を引く辞書。ページを足したらここで更新する
+    private func addToDay(into dayIndex: inout [Date: Int], _ entry: DiaryEntry) {
+        let day = Calendar.current.startOfDay(for: entry.date)
+        guard let i = dayIndex[day] else {
+            dayIndex[day] = diary.count
             diary.append(entry)
             return
         }
@@ -699,8 +718,17 @@ final class PlantStore {
     }
 
     /// その株の、いちばん新しいパラパラの1枚。パラパラカメラで薄く重ねる
+    ///
+    /// **先頭の1枚だけ要るので、リストは作らない。**カメラの描き直しのたびに呼ばれ、
+    /// `flipbookPhotos(of:)` は全ページ分の `PlantPhoto` を組み立てていた。
+    /// 並びは同じ（新しいページから、ページの中は後ろから）
     func latestFlipbookRef(of plantId: UUID) -> String? {
-        flipbookPhotos(of: plantId).first?.ref
+        for entry in diary {
+            if let photo = entry.photos.last(where: { $0.flipbook && $0.plantId == plantId && !$0.isUnused }) {
+                return photo.ref
+            }
+        }
+        return nil
     }
 
     /// 日記を書いた日の数。**お休みの日（本文も写真も無い日）は数えない**

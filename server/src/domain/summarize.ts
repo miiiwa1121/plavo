@@ -41,8 +41,15 @@ const BANDS: Band[] = [
   { label: "夜", fromHour: 19, toHour: 24 },
 ];
 
+/** 時刻は `Date` に直すのが重いので、点ごとに1回だけ求めて持つ（帯 × 指標の数だけ読み直さない） */
+const hourCache = new WeakMap<SensorReading, number>();
+
 function inBand(r: SensorReading, band: Band): boolean {
-  const h = new Date(r.measuredAt).getHours();
+  let h = hourCache.get(r);
+  if (h === undefined) {
+    h = new Date(r.measuredAt).getHours();
+    hourCache.set(r, h);
+  }
   return h >= band.fromHour && h < band.toHour;
 }
 

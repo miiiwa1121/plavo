@@ -185,8 +185,11 @@ final class TalkStore {
 
     /// その日にその株を撮った写真（パラパラは除く）
     private func seededPhotos(of plantId: UUID, on date: Date) -> [String] {
-        plantStore.diary
-            .filter { Calendar.current.isDate($0.date, inSameDayAs: date) }
+        // 日の範囲は1回だけ求める。ページごとに `isDate` を呼ぶと、ページ数に比例して重い
+        let day = Calendar.current.dateInterval(of: .day, for: date)
+            ?? DateInterval(start: date, duration: 1)
+        return plantStore.diary
+            .filter { $0.date >= day.start && $0.date < day.end }
             .flatMap(\.photos)
             .filter { $0.plantId == plantId && !$0.flipbook }
             .map(\.ref)
